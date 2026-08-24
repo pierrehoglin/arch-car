@@ -24,7 +24,7 @@ import getpass
 import argparse
 
 from carlib.system import wifi
-from carlib.core.output import run, emit_json
+from carlib.core.output import run, emit_json, global_flags, parse_args
 
 
 def show_status(state) -> None:
@@ -111,8 +111,7 @@ async def cmd_forget(args) -> None:
 
 
 def main() -> int:
-    common = argparse.ArgumentParser(add_help=False)
-    common.add_argument('--json', action='store_true')
+    common = global_flags('--json')
 
     ap = argparse.ArgumentParser(
         description=__doc__.strip(),
@@ -148,7 +147,7 @@ def main() -> int:
     p.set_defaults(fn=cmd_forget)
     p.add_argument('ssid')
 
-    args = ap.parse_args()
+    args = parse_args(ap, defaults={'json': False})
     return run(args.fn(args))
 
 

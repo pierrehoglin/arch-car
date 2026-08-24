@@ -32,7 +32,8 @@ import sys
 import argparse
 
 from carlib.location import gps as location
-from carlib.core.output import run, emit_json, add_target, dash
+from carlib.core.output import (
+    run, emit_json, add_target, dash, global_flags, parse_args)
 
 
 def show_fix(fix) -> None:
@@ -173,8 +174,7 @@ async def cmd_supl(args) -> None:
 def main() -> int:
     # A parent parser so --json works either side of the subcommand:
     # `gps --json get` and `gps get --json` both parse.
-    common = argparse.ArgumentParser(add_help=False)
-    common.add_argument('--json', action='store_true')
+    common = global_flags('--json')
 
     ap = argparse.ArgumentParser(
         description=__doc__.strip(),
@@ -217,7 +217,7 @@ def main() -> int:
     p.add_argument('server', help='e.g. supl.google.com:7275')
     add_target(p, required=False)
 
-    args = ap.parse_args()
+    args = parse_args(ap, defaults={'json': False})
     return run(args.fn(args))
 
 

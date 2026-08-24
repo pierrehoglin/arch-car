@@ -19,7 +19,7 @@ import sys
 import argparse
 
 from carlib.system import audio
-from carlib.core.output import run, emit_json
+from carlib.core.output import run, emit_json, global_flags, parse_args
 
 STEP = 5
 
@@ -122,8 +122,7 @@ async def cmd_waybar(args) -> None:
 
 
 def main() -> int:
-    common = argparse.ArgumentParser(add_help=False)
-    common.add_argument('--json', action='store_true')
+    common = global_flags('--json')
 
     ap = argparse.ArgumentParser(
         description=__doc__.strip(),
@@ -168,9 +167,7 @@ def main() -> int:
     if argv and argv[0].lstrip('-').isdigit() and not argv[0].startswith('-'):
         argv = ['set'] + argv
 
-    args = ap.parse_args(argv)
-    if args.cmd is None:
-        args = ap.parse_args(['get'])
+    args = parse_args(ap, 'get', argv=argv, defaults={'json': False})
 
     return run(args.fn(args))
 

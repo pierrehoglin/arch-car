@@ -8,6 +8,7 @@ should not drag in argparse or sys.exit.
 
 import sys
 import json
+import argparse
 import asyncio
 from dataclasses import is_dataclass, asdict
 from typing import Any, Awaitable
@@ -114,6 +115,60 @@ def run(coro: Awaitable[Any]) -> int:
         print(f'error: {exc}', file=sys.stderr)
         return 1
     return 0
+
+
+def global_flags(*names: str, **flags):
+    """
+    A parent parser whose flags do not get clobbered by subparsers.
+
+    The trap: a flag defined on a parent and inherited by every
+    subparser is parsed twice. `tool --json sub` sets --json on the
+    top-level namespace, then the subparser writes its own default over
+    it, and the flag silently does nothing.
+
+    argparse.SUPPRESS as the default means the subparser writes nothing
+    when the flag is absent, so whichever position it appears in wins.
+
+        common = global_flags('--json')
+        ap = argparse.ArgumentParser(parents=[common])
+        sub.add_parser('status', parents=[common])
+    """
+    parser = argparse.ArgumentParser(add_help=False)
+    for name in names:
+        parser.add_argument(name, action='store_true',
+                            default=argparse.SUPPRESS)
+    for name, default in flags.items():
+        parser.add_argument(f'--{name.replace("_", "-")}',
+                            default=argparse.SUPPRESS)
+    return parser
+
+
+def parse_args(parser, default_cmd: str | None = None,
+               argv: list[str] | None = None,
+               defaults: dict | None = None):
+    """
+    Parse, defaulting to a subcommand without discarding the flags.
+
+    Re-parsing `[default_cmd]` alone loses everything the user typed,
+    so `tool --json` silently drops --json. Pass the original argv
+    through instead.
+
+    `defaults` fills in any flag suppressed by global_flags(), since a
+    suppressed flag is simply absent from the namespace when unused.
+    """
+    if argv is None:
+        argv = sys.argv[1:]
+
+    args = parser.parse_args(argv)
+
+    if getattr(args, 'cmd', None) is None and default_cmd:
+        args = parser.parse_args([default_cmd] + argv)
+
+    for key, value in (defaults or {}).items():
+        if not hasattr(args, key):
+            setattr(args, key, value)
+
+    return args
 
 
 def add_target(parser, name: str = 'target', required: bool = True,

@@ -22,7 +22,7 @@ import sys
 import argparse
 
 from carlib.system import services
-from carlib.core.output import run, emit_json
+from carlib.core.output import run, emit_json, global_flags, parse_args
 
 
 def show(state) -> None:
@@ -92,8 +92,7 @@ async def cmd_disable(args) -> None:
 
 
 def main() -> int:
-    common = argparse.ArgumentParser(add_help=False)
-    common.add_argument('--json', action='store_true')
+    common = global_flags('--json')
 
     ap = argparse.ArgumentParser(
         description=__doc__.strip(),
@@ -119,7 +118,7 @@ def main() -> int:
         sp.set_defaults(fn=fn)
         sp.add_argument('service', help=f'one of: {", ".join(choices)}')
 
-    args = ap.parse_args()
+    args = parse_args(ap, defaults={'json': False})
     return run(args.fn(args))
 
 

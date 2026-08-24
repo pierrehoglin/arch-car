@@ -28,7 +28,7 @@ import sys
 import argparse
 
 from carlib.vehicle import can
-from carlib.core.output import run, emit_json
+from carlib.core.output import run, emit_json, global_flags, parse_args
 
 
 async def cmd_interfaces(args) -> None:
@@ -120,8 +120,7 @@ async def cmd_send(args) -> None:
 
 
 def main() -> int:
-    common = argparse.ArgumentParser(add_help=False)
-    common.add_argument('--json', action='store_true')
+    common = global_flags('--json')
     common.add_argument('-c', '--channel', default='can0',
                         help='CAN interface (default: can0)')
 
@@ -153,7 +152,7 @@ def main() -> int:
     p.add_argument('--extended', action='store_true',
                    help='29-bit identifier')
 
-    args = ap.parse_args()
+    args = parse_args(ap, defaults={'json': False})
     return run(args.fn(args))
 
 

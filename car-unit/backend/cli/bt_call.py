@@ -28,7 +28,8 @@ import asyncio
 import argparse
 
 from carlib.bluetooth import calls
-from carlib.core.output import run, emit_json, add_target, dash
+from carlib.core.output import (
+    run, emit_json, add_target, dash, global_flags, parse_args)
 
 
 async def cmd_modems(args) -> None:
@@ -219,7 +220,7 @@ def main() -> int:
     p.add_argument('state', nargs='?', choices=['on', 'off'])
     add_target(p, required=False)
 
-    args = ap.parse_args()
+    args = parse_args(ap, defaults={'json': False})
     return run(args.fn(args))
 
 

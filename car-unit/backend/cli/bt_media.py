@@ -22,7 +22,8 @@ import json
 import argparse
 
 from carlib.bluetooth import media
-from carlib.core.output import run, emit_json, add_target, STATUS_GLYPH
+from carlib.core.output import (
+    run, emit_json, add_target, STATUS_GLYPH, global_flags, parse_args)
 
 
 async def cmd_players(args) -> None:
@@ -128,7 +129,7 @@ def main() -> int:
         sp.set_defaults(fn=cmd_control)
         add_target(sp, required=False)
 
-    args = ap.parse_args()
+    args = parse_args(ap, defaults={'json': False})
     return run(args.fn(args))
 
 

@@ -18,7 +18,7 @@ import asyncio
 import argparse
 
 from carlib.system import lte
-from carlib.core.output import run, emit_json, dash
+from carlib.core.output import run, emit_json, dash, global_flags, parse_args
 
 # Nerd Font glyphs. Empty boxes mean the font is missing:
 # pacman -S ttf-nerd-fonts-symbols
@@ -128,8 +128,7 @@ async def cmd_watch(args) -> None:
 
 
 def main() -> int:
-    common = argparse.ArgumentParser(add_help=False)
-    common.add_argument('--json', action='store_true')
+    common = global_flags('--json')
 
     ap = argparse.ArgumentParser(
         description=__doc__.strip(),
@@ -150,9 +149,7 @@ def main() -> int:
     p.set_defaults(fn=cmd_watch)
     p.add_argument('--interval', type=float, default=5.0)
 
-    args = ap.parse_args()
-    if args.cmd is None:
-        args = ap.parse_args(['status'])
+    args = parse_args(ap, 'status', defaults={'json': False})
 
     return run(args.fn(args))
 

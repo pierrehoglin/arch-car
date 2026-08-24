@@ -20,7 +20,7 @@ import sys
 import argparse
 
 from carlib.bluetooth import messages
-from carlib.core.output import run, emit_json
+from carlib.core.output import run, emit_json, global_flags, parse_args
 
 
 async def cmd_folders(args) -> None:
@@ -109,7 +109,7 @@ def main() -> int:
     p.add_argument('number')
     p.add_argument('text')
 
-    args = ap.parse_args()
+    args = parse_args(ap, defaults={'json': False})
     return run(args.fn(args))
 
 
