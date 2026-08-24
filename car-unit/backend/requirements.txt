@@ -1,0 +1,3 @@
+# Editable install with no version control (dbus-api==0.1.0)
+-e /home/pierre/Code/Mina projekt/arch-car/car-unit/backend
+sdbus==0.14.2

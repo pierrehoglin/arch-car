@@ -1,0 +1,33 @@
+[project]
+name = "car-unit"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "sdbus>=0.11",
+]
+
+[project.optional-dependencies]
+can = ["python-can>=4.0"]
+
+[project.scripts]
+bt-call      = "cli.bt_call:main"
+bt-media     = "cli.bt_media:main"
+bt-devices   = "cli.bt_devices:main"
+bt-phonebook = "cli.bt_phonebook:main"
+bt-messages  = "cli.bt_messages:main"
+gps          = "cli.gps:main"
+svc          = "cli.svc:main"
+lte          = "cli.lte:main"
+wifi         = "cli.wifi:main"
+audio        = "cli.audio:main"
+can          = "cli.can:main"
+
+[tool.uv]
+package = true
+
+[tool.setuptools.packages.find]
+include = ["carlib*", "cli*"]
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
