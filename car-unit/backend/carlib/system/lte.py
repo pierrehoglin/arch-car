@@ -111,30 +111,36 @@ async def _bearer_state(modem_path: str) -> dict:
     """
     Find the data bearer and read it.
 
+    Bearers are NOT in GetManagedObjects -- ModemManager's ObjectManager
+    exposes modems and SIMs only. The paths come from the modem's own
+    Bearers property, and each is then proxied directly.
+
     A SIM7600 exposes two: an initial EPS attach bearer created at
-    registration, and the actual data bearer. The attach bearer reports
-    connected but carries no user traffic, so pick the one with an
-    interface.
+    registration, and the actual data bearer. Both report connected,
+    but only the data one has a network interface, so that is the
+    discriminator.
     """
-    objects = await mm.managed_objects()
     bus = system_bus()
 
-    best = {}
-    for path, interfaces in objects.items():
-        raw = interfaces.get(IFACE_BEARER)
-        if raw is None:
-            continue
-        if not path.startswith('/org/freedesktop/ModemManager1/Bearer'):
-            continue
+    modem = mm.Modem.new_proxy(mm.SERVICE, modem_path, bus)
+    try:
+        paths = await modem.bearers
+    except Exception:
+        return {}
 
-        p = props(raw)
-        iface = p.get('Interface') or ''
-        if not p.get('Connected'):
-            continue
+    fallback = {}
+    for path in paths:
+        try:
+            bearer = Bearer.new_proxy(mm.SERVICE, path, bus)
+            if not await bearer.connected:
+                continue
 
-        ip4 = props(p.get('Ip4Config') or {})
-        settings = props(p.get('Properties') or {})
-        stats = props(p.get('Stats') or {})
+            iface = await bearer.interface or ''
+            ip4 = props(await bearer.ip4_config)
+            settings = props(await bearer.properties)
+            stats = props(await bearer.stats)
+        except Exception:
+            continue
 
         candidate = {
             'connected': True,
@@ -146,12 +152,13 @@ async def _bearer_state(modem_path: str) -> dict:
             'duration': int(stats.get('duration', 0) or 0),
         }
 
-        # The bearer with a network interface is the data one.
+        # The bearer with a network interface is the data one; the
+        # attach bearer has none.
         if iface:
             return candidate
-        best = best or candidate
+        fallback = fallback or candidate
 
-    return best
+    return fallback
 
 
 async def status(match: str | None = None) -> LteState:

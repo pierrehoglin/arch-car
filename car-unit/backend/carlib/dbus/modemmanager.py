@@ -127,6 +127,20 @@ class Modem(DbusInterfaceCommonAsync,
     def access_technologies(self) -> int:
         raise NotImplementedError
 
+    @dbus_property_async(property_signature='ao')
+    def bearers(self) -> list[str]:
+        """
+        Object paths of this modem's bearers.
+
+        Bearers are not exposed through GetManagedObjects -- this
+        property is the only way to enumerate them.
+        """
+        raise NotImplementedError
+
+    @dbus_method_async(result_signature='ao')
+    async def list_bearers(self) -> list[str]:
+        raise NotImplementedError
+
     @dbus_signal_async('iiu')
     def state_changed(self) -> tuple[int, int, int]:
         raise NotImplementedError
