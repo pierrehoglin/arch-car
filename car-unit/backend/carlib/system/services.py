@@ -186,35 +186,15 @@ async def set_enabled(name: str, enabled: bool) -> ServiceState:
     return await status(name)
 
 
-# --- Hotspot and wifi are mutually exclusive ------------------------------
-
-async def hotspot_on() -> ServiceState:
-    """
-    Start the hotspot, stopping the wifi client first.
-
-    The Pi 4 has one radio, so AP and station mode cannot coexist.
-    Starting hostapd while iwd holds the interface fails with a
-    scan-in-progress conflict that is hard to read.
-    """
-    try:
-        current = await status('wifi')
-        if current.active:
-            await stop('wifi')
-    except Exception:
-        pass        # wifi may not be installed; hostapd can still start
-    return await start('hotspot')
-
-
-async def hotspot_off(restore_wifi: bool = True) -> ServiceState:
-    result = await stop('hotspot')
-    if restore_wifi:
-        try:
-            await start('wifi')
-        except Exception:
-            pass
-    return result
-
-
-async def hotspot_toggle() -> ServiceState:
-    current = await status('hotspot')
-    return await (hotspot_off() if current.active else hotspot_on())
+# --- Hotspot --------------------------------------------------------------
+#
+# Hotspot control lives in carlib.system.hotspot, which knows about the
+# radio conflict, the DHCP leases and the uplink. It is not just a
+# service start.
+#
+# The earlier versions here stopped iwd to free the interface. That is
+# wrong once NetworkManager owns the radio: NM starts iwd as its
+# backend and restarts it, so stopping the unit achieves nothing. Use
+# `nmcli device set wlan0 managed no` instead -- and never
+# `nmcli radio wifi off`, which rfkill-blocks the whole phy and
+# persists across reboots.

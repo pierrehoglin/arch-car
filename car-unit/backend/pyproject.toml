@@ -19,6 +19,7 @@ gps          = "cli.gps:main"
 svc          = "cli.svc:main"
 lte          = "cli.lte:main"
 wifi         = "cli.wifi:main"
+hotspot      = "cli.hotspot:main"
 audio        = "cli.audio:main"
 can          = "cli.can:main"
 

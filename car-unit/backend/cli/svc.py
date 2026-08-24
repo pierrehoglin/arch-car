@@ -21,7 +21,7 @@ carlib/system/services.py for it.
 import sys
 import argparse
 
-from carlib.system import services
+from carlib.system import services, hotspot
 from carlib.core.output import run, emit_json, global_flags, parse_args
 
 
@@ -54,7 +54,8 @@ async def cmd_status(args) -> None:
 
 async def cmd_on(args) -> None:
     if args.service == 'hotspot':
-        state = await services.hotspot_on()
+        await hotspot.start()
+        state = await services.status('hotspot')
     else:
         state = await services.start(args.service)
     show(state) if not args.json else emit_json(state)
@@ -62,7 +63,8 @@ async def cmd_on(args) -> None:
 
 async def cmd_off(args) -> None:
     if args.service == 'hotspot':
-        state = await services.hotspot_off()
+        await hotspot.stop()
+        state = await services.status('hotspot')
     else:
         state = await services.stop(args.service)
     show(state) if not args.json else emit_json(state)
@@ -70,7 +72,8 @@ async def cmd_off(args) -> None:
 
 async def cmd_toggle(args) -> None:
     if args.service == 'hotspot':
-        state = await services.hotspot_toggle()
+        await hotspot.toggle()
+        state = await services.status('hotspot')
     else:
         state = await services.toggle(args.service)
     show(state) if not args.json else emit_json(state)
