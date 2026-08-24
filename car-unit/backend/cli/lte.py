@@ -22,26 +22,30 @@ from carlib.core.output import run, emit_json, dash, global_flags, parse_args
 
 # Nerd Font glyphs. Empty boxes mean the font is missing:
 # pacman -S ttf-nerd-fonts-symbols
-GLYPH_OFF = '\U000f10dd'        # signal-off
-GLYPH_NO_SIM = '\U000f0f31'     # sim-off
-GLYPH_SEARCH = '\U000f08c1'     # signal-searching
+# Nerd Font glyphs. Empty boxes mean the font is missing:
+# pacman -S ttf-nerd-fonts-symbols
+GLYPH_DISCONNECTED = '\U000f08fd'   # nf-md-network_strength_off_outline
 GLYPH_BARS = {
-    0: '\U000f0a61',            # signal-cellular-outline
-    1: '\U000f0a5f',            # signal-cellular-1
-    2: '\U000f0a60',            # signal-cellular-2
-    3: '\U000f0a61',            # signal-cellular-3
-    4: '\U000f0a61',
+    0: '\U000f08fe',                # network-strength-outline
+    1: '\U000f08f4',                # network-strength-1
+    2: '\U000f08f6',                # network-strength-2
+    3: '\U000f08f8',                # network-strength-3
+    4: '\U000f08fa',                # network-strength-4
 }
 
 
 def pick_glyph(state) -> str:
-    if not state.present:
-        return GLYPH_NO_SIM
-    if not state.connected:
-        return GLYPH_SEARCH if state.state in ('searching', 'enabled',
-                                               'registered') else GLYPH_OFF
+    """
+    Two states only: connected with a strength, or disconnected.
+
+    Anything short of a live bearer -- no modem, searching, registered
+    but not connected -- renders the same, because from the driver's
+    seat there is no useful distinction.
+    """
+    if not state.present or not state.connected:
+        return GLYPH_DISCONNECTED
     bars = min(4, max(0, round(state.signal / 25)))
-    return GLYPH_BARS.get(bars, GLYPH_BARS[0])
+    return GLYPH_BARS[bars]
 
 
 def show(state) -> None:
@@ -78,39 +82,48 @@ async def cmd_status(args) -> None:
 
 
 async def cmd_waybar(args) -> None:
-    """One JSON line for a Waybar custom module."""
+    """
+    One JSON line for a Waybar custom module.
+
+    Two classes only: connected or disconnected. The stalled case --
+    bearer up, carrier discarding traffic -- still shows as connected,
+    because the icon is a signal indicator, not a diagnostic. The
+    tooltip carries the byte counters if you want to check.
+    """
     try:
         state = await lte.status()
     except Exception:
-        print(json.dumps({'text': GLYPH_OFF, 'class': 'unavailable',
-                          'tooltip': 'modem unavailable'}))
+        print(json.dumps({
+            'text': GLYPH_DISCONNECTED,
+            'alt': 'disconnected',
+            'class': 'disconnected',
+            'tooltip': 'modem unavailable',
+        }))
         return
 
     glyph = pick_glyph(state)
 
-    if not state.present:
-        css = 'absent'
-        text = glyph
-        tooltip = state.state
-    elif not state.connected:
-        css = 'disconnected'
-        text = glyph
-        tooltip = f'{state.state}\n{state.operator or "no operator"}'
-    else:
-        css = 'connected' if state.carrying else 'stalled'
-        text = f'{glyph}  {state.access_technology.upper()}' \
-            if args.show_tech else glyph
-        tooltip = (f'{state.operator}\n'
-                   f'{state.access_technology} · {state.signal}%\n'
-                   f'{state.ip_address}\n'
-                   f'{lte.format_bytes(state.bytes_rx)} down / '
-                   f'{lte.format_bytes(state.bytes_tx)} up')
+    if not state.present or not state.connected:
+        print(json.dumps({
+            'text': glyph,
+            'alt': 'disconnected',
+            'class': 'disconnected',
+            'tooltip': state.summary,
+        }, ensure_ascii=False))
+        return
+
+    text = f'{glyph}  {state.access_technology.upper()}' \
+        if args.show_tech else glyph
 
     print(json.dumps({
         'text': text,
-        'alt': css,
-        'class': css,
-        'tooltip': tooltip,
+        'alt': 'connected',
+        'class': 'connected',
+        'tooltip': (f'{state.operator}\n'
+                    f'{state.access_technology} \u00b7 {state.signal}%\n'
+                    f'{state.ip_address}\n'
+                    f'{lte.format_bytes(state.bytes_rx)} down / '
+                    f'{lte.format_bytes(state.bytes_tx)} up'),
         'percentage': state.signal,
     }, ensure_ascii=False))
 
