@@ -26,8 +26,8 @@ import argparse
 from carlib.system import hotspot
 from carlib.core.output import run, emit_json, global_flags, parse_args
 
-GLYPH_ON = '\U000f0a0c'         # nf-md-access_point_network
-GLYPH_OFF = '\U000f0a0b'        # nf-md-access_point_network_off
+GLYPH_ON = '\U000f0469'         # nf-md-wifi
+GLYPH_OFF = '\U000f15a3'        # nf-md-wifi_off
 
 
 def show(state) -> None:
@@ -41,10 +41,19 @@ def show(state) -> None:
     print(f'  channel:  {state.channel or "-"}  {state.band}')
     print(f'  address:  {state.address or "-"}')
     print(f'  uplink:   {state.uplink or "none"}')
-    print(f'  clients:  {state.client_count}')
+    print(f'  clients:  {state.client_count}'
+          f'{"" if state.clients_verified else "  (unverified)"}')
 
     for client in state.clients:
-        print(f'      {client.ip:<15} {client.mac}  {client.hostname}')
+        print(f'      {client.ip or "(no lease)":<15} {client.mac}  '
+              f'{client.hostname}')
+
+    if state.stale_leases:
+        print(f'  stale leases: {len(state.stale_leases)}'
+              f'  (leased but not associated)')
+        for client in state.stale_leases:
+            print(f'      {client.ip:<15} {client.mac}  '
+                  f'{client.hostname}')
 
     if state.followers:
         unhealthy = [u for u, s in state.followers.items()
@@ -94,11 +103,18 @@ async def cmd_clients(args) -> None:
         return
     if not state.clients:
         print('no clients connected')
+        if state.stale_leases:
+            print(f'\n{len(state.stale_leases)} stale lease(s):',
+                  file=sys.stderr)
+            for c in state.stale_leases:
+                print(f'  {c.ip:<15}  {c.mac}  {c.hostname}',
+                      file=sys.stderr)
         return
 
     width = max(len(c.hostname or '?') for c in state.clients)
     for c in state.clients:
-        print(f'{c.ip:<15}  {c.mac}  {(c.hostname or "?"):<{width}}')
+        print(f'{(c.ip or "(no lease)"):<15}  {c.mac}  '
+              f'{(c.hostname or "?"):<{width}}')
 
 
 async def cmd_waybar(args) -> None:
@@ -120,7 +136,11 @@ async def cmd_waybar(args) -> None:
         return
 
     count = state.client_count
-    text = f'{GLYPH_ON}  {count}' if count else GLYPH_ON
+    # Waybar renders `text` as Pango markup. Wrapping the count in a
+    # span with a class lets CSS style it apart from the icon --
+    # #custom-hotspot span.clients { ... }
+    text = (f'{GLYPH_ON}  <span class="clients">{count}</span>'
+            if count else GLYPH_ON)
 
     names = '\n'.join(f'  {c.ip}  {c.label}' for c in state.clients)
     tooltip = (f'{state.ssid or "hotspot"}\n'

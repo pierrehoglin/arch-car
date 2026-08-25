@@ -64,6 +64,8 @@ class HotspotState:
     address: str = ''
     uplink: str = ''
     clients: list[Client] = field(default_factory=list)
+    stale_leases: list[Client] = field(default_factory=list)
+    clients_verified: bool = True
     followers: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
@@ -177,17 +179,18 @@ def read_leases(subnet_prefix: str = '192.168.50.') -> list[Client]:
     return []
 
 
-async def associated_macs() -> list[str]:
+async def associated_macs() -> list[str] | None:
     """
     MACs currently associated at the radio level.
 
-    A device can hold a lease after disconnecting, so this is the
-    authoritative list of who is actually on the air.
+    Returns None when the check itself could not run -- an empty list
+    genuinely means nobody is connected, and conflating the two makes
+    stale leases look like live clients.
     """
     try:
         out = await _run('iw', 'dev', INTERFACE, 'station', 'dump')
     except NotAvailableError:
-        return []
+        return None
 
     return re.findall(r'Station ([0-9a-f:]{17})', out, re.IGNORECASE)
 
@@ -233,14 +236,38 @@ async def status() -> HotspotState:
     state.address = await _interface_address()
     state.uplink = await _uplink()
 
-    # Only report clients that are both leased and associated.
+    # A lease outlives the connection -- dnsmasq keeps it for the full
+    # lease time whether or not the device is still on the air. So the
+    # station dump decides who counts as connected; the lease only
+    # supplies the address and hostname.
     leases = read_leases()
-    associated = {m.lower() for m in await associated_macs()}
-    if associated:
-        state.clients = [c for c in leases
-                         if c.mac.lower() in associated]
-    else:
+    associated = await associated_macs()
+
+    if associated is None:
+        # The check could not run (no iw, wrong interface). Report the
+        # leases but flag that they are unverified rather than silently
+        # implying they are live.
         state.clients = leases
+        state.clients_verified = False
+        return state
+
+    by_mac = {c.mac.lower(): c for c in leases}
+    state.clients_verified = True
+    state.clients = []
+
+    for mac in associated:
+        mac = mac.lower()
+        # An associated device with no lease yet still counts -- it is
+        # on the air, just mid-DHCP.
+        state.clients.append(by_mac.get(mac, Client(mac=mac)))
+
+    state.clients.sort(key=lambda c: c.ip or c.mac)
+
+    # Leases with no matching station: expired connections, useful to
+    # show separately rather than as connected clients.
+    state.stale_leases = [c for c in leases
+                          if c.mac.lower() not in
+                          {m.lower() for m in associated}]
 
     return state
 
