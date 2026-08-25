@@ -272,6 +272,33 @@ async def status() -> HotspotState:
     return state
 
 
+async def _wait_for(active: bool, timeout: float = 10.0) -> bool:
+    """
+    Poll until hostapd reaches the wanted state.
+
+    systemd's StartUnit and StopUnit return once the *job is queued*,
+    not once the unit has settled. Reading status immediately reports
+    the old value, which makes a toggle look like it did nothing.
+    """
+    waited = 0.0
+    step = 0.25
+
+    while waited < timeout:
+        try:
+            svc = await services.status('hotspot')
+            if svc.active == active:
+                # hostapd reports active before the AP is fully up;
+                # a beat here means the client list is accurate too.
+                await asyncio.sleep(0.3)
+                return True
+        except Exception:
+            pass
+        await asyncio.sleep(step)
+        waited += step
+
+    return False
+
+
 async def start() -> HotspotState:
     """
     Bring the hotspot up, releasing wlan0 from NetworkManager first.
@@ -286,12 +313,14 @@ async def start() -> HotspotState:
         pass        # NetworkManager may not be managing it at all
 
     await services.start('hotspot')
+    await _wait_for(True)
     return await status()
 
 
 async def stop(restore_wifi: bool = True) -> HotspotState:
     """Stop the hotspot and hand wlan0 back to NetworkManager."""
     await services.stop('hotspot')
+    await _wait_for(False)
 
     if restore_wifi:
         try:
@@ -303,8 +332,10 @@ async def stop(restore_wifi: bool = True) -> HotspotState:
 
 
 async def toggle() -> HotspotState:
-    current = await status()
-    return await (stop() if current.active else start())
+    current = await services.status('hotspot')
+    if current.active:
+        return await stop()
+    return await start()
 
 
 async def restart() -> HotspotState:

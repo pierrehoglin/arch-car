@@ -136,11 +136,7 @@ async def cmd_waybar(args) -> None:
         return
 
     count = state.client_count
-    # Waybar renders `text` as Pango markup. Wrapping the count in a
-    # span with a class lets CSS style it apart from the icon --
-    # #custom-hotspot span.clients { ... }
-    text = (f'{GLYPH_ON}  <span class="clients">{count}</span>'
-            if count else GLYPH_ON)
+    text = f'{GLYPH_ON} {count}' if count else GLYPH_ON
 
     names = '\n'.join(f'  {c.ip}  {c.label}' for c in state.clients)
     tooltip = (f'{state.ssid or "hotspot"}\n'
