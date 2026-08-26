@@ -29,12 +29,18 @@ Needs polkit authorisation, or sudo. To avoid sudo:
 """
 
 import sys
+import json
 import argparse
 from datetime import datetime
 
 from carlib.location import gps as location
 from carlib.core.output import (
     run, emit_json, add_target, dash, global_flags, parse_args)
+
+# Nerd Font glyph. Empty box means the font is missing:
+# pacman -S ttf-nerd-fonts-symbols
+GLYPH = '\U000f0471'        # nf-md-crosshairs_gps
+
 
 
 def show_fix(fix) -> None:
@@ -198,6 +204,69 @@ async def cmd_sats(args) -> None:
           file=sys.stderr)
 
 
+async def cmd_waybar(args) -> None:
+    """
+    One JSON line for a Waybar custom module.
+
+    Two classes: `on` when GPS is enabled and reporting, `off` when
+    there is no modem or location gathering is not enabled. A fix is
+    not required for `on` -- a receiver tracking satellites but still
+    working towards a fix is working, and showing that is the point of
+    the satellite count.
+    """
+    try:
+        state = await location.status(args.target)
+        enabled = state['enabled']
+        gps_on = 'gps-nmea' in enabled or 'gps-raw' in enabled
+    except Exception:
+        print(json.dumps({
+            'text': GLYPH,
+            'alt': 'off',
+            'class': 'off',
+            'tooltip': 'no modem',
+        }, ensure_ascii=False))
+        return
+
+    if not gps_on:
+        print(json.dumps({
+            'text': GLYPH,
+            'alt': 'off',
+            'class': 'off',
+            'tooltip': 'GPS not enabled',
+        }, ensure_ascii=False))
+        return
+
+    try:
+        fix = await location.get(args.target)
+    except Exception:
+        print(json.dumps({
+            'text': GLYPH,
+            'alt': 'off',
+            'class': 'off',
+            'tooltip': 'cannot read location',
+        }, ensure_ascii=False))
+        return
+
+    used = fix.satellites_used
+    visible = fix.satellites_visible
+
+    if fix.has_fix:
+        tooltip = (f'{fix.format_coordinates()}\n'
+                   f'{fix.mode} fix \u00b7 {used}/{visible} satellites\n'
+                   f'hdop {dash(fix.hdop)}')
+    else:
+        tooltip = (f'no fix\n'
+                   f'{used}/{visible} satellites\n'
+                   f'cold starts take minutes')
+
+    print(json.dumps({
+        'text': f'{GLYPH}  {used}',
+        'alt': 'on',
+        'class': 'on',
+        'tooltip': tooltip,
+    }, ensure_ascii=False))
+
+
 async def cmd_watch(args) -> None:
     print('watching for position updates (ctrl-c to stop)')
     async for fix in location.watch(args.target):
@@ -241,6 +310,7 @@ def main() -> int:
             ('get', cmd_get, 'read the current position'),
             ('sats', cmd_sats, 'satellite detail'),
             ('watch', cmd_watch, 'live position updates'),
+            ('waybar', cmd_waybar, 'one JSON line for a status bar'),
             ('disable', cmd_disable, 'turn location gathering off')):
         sp = sub.add_parser(name, parents=[common], help=help_text)
         sp.set_defaults(fn=fn)
