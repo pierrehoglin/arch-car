@@ -22,6 +22,7 @@ wrong frequency. `rtl_test` naming the tuner is the quick check.
 
 import os
 import json
+import shutil
 import time
 import signal
 import asyncio
@@ -38,10 +39,16 @@ RTL_POWER = 'rtl_power'
 REDSEA = 'redsea'
 SOX = 'sox'
 PLAY = 'play'
+PW_PLAY = 'pw-play'
 
 # Tag the playback stream so it can be found on the PipeWire graph and
 # muted independently. Node ids are assigned at runtime and change
 # constantly, so the tag is the only stable handle.
+#
+# pw-play is preferred over sox's `play` because it is PipeWire-native
+# and honours --media-name. sox typically links against ALSA, in which
+# case PULSE_PROP never reaches the graph and the stream shows up as a
+# generic "SoX" -- which would collide with any other sox process.
 STREAM_TAG = 'carlib-fm'
 
 # FM broadcast band. Japan and a few other places differ, but this is
@@ -527,6 +534,26 @@ async def devices() -> list[str]:
 
 # --- Playback --------------------------------------------------------------
 
+def player_command() -> str:
+    """
+    The command that puts audio on the graph.
+
+    pw-play when available: it is PipeWire-native and --media-name
+    sets a property we can find the stream by. Falling back to sox's
+    `play` costs us a reliable tag, since sox built against ALSA
+    ignores PULSE_PROP -- the stream then appears as a generic "SoX",
+    which the matcher can still find but would confuse with any other
+    sox process.
+    """
+    if shutil.which(PW_PLAY):
+        return (f'{PW_PLAY} --media-name={STREAM_TAG} '
+                f'--rate {AUDIO_RATE} --channels 1 --format s16 '
+                f'--raw -')
+
+    return (f"PULSE_PROP='application.name={STREAM_TAG}' "
+            f'{PLAY} -q -r {AUDIO_RATE} -t raw -e s -b 16 -c 1 -')
+
+
 def build_command(frequency: float, gain: float = DEFAULT_GAIN,
                   device: int = 0, squelch: int = 0,
                   rds: bool = True) -> str:
@@ -544,15 +571,13 @@ def build_command(frequency: float, gain: float = DEFAULT_GAIN,
 
     Without RDS it is the simpler wbfm path, which costs less CPU.
     """
-    tag = (f"PULSE_PROP='application.name={STREAM_TAG} "
-           f"media.role=Music'")
+    sink = player_command()
 
     if not rds:
         return (
             f'{RTL_FM} -d {device} -f {frequency:.1f}M -M wbfm '
             f'-s {DEMOD_RATE} -r {AUDIO_RATE} -g {gain:g} -l {squelch} '
-            f'| {tag} {PLAY} -q -r {AUDIO_RATE} -t raw '
-            f'-e s -b 16 -c 1 -'
+            f'| {sink}'
         )
 
     return (
@@ -561,8 +586,7 @@ def build_command(frequency: float, gain: float = DEFAULT_GAIN,
         f'| {REDSEA} -e -r {MPX_RATE} 2>>"{RDS_FILE}" '
         f'| {SOX} -q -r {MPX_RATE} -t raw -e s -b 16 -c 1 - '
         f'-t raw -r {AUDIO_RATE} - lowpass {AUDIO_LOWPASS} '
-        f'| {tag} {PLAY} -q -r {AUDIO_RATE} -t raw '
-        f'-e s -b 16 -c 1 -'
+        f'| {sink}'
     )
 
 
@@ -1219,7 +1243,9 @@ async def _resolve_node(force: bool = False) -> int:
         except NotAvailableError:
             return int(cached)      # PipeWire unreachable; try anyway
 
-    node = await pipewire.find(application=STREAM_TAG, binary='sox')
+    node = await pipewire.find(application=STREAM_TAG,
+                               name=STREAM_TAG,
+                               binary='sox')
     data['node_id'] = node.id
     _write_state(data)
     return node.id

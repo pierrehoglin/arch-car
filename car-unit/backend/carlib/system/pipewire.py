@@ -134,29 +134,38 @@ def match(candidates: list[Node], *,
           name: str = '',
           binary: str = '') -> Node | None:
     """
-    Find a node by property, preferring an exact application match.
+    Find a node by property, most specific match first.
 
-    Several fields are checked because tagging is not always honoured:
-    sox may or may not pass PULSE_PROP through depending on how it was
-    built, in which case the stream shows up under the binary name
-    instead.
+    Every supplied term is tried against every field, because what
+    lands on the graph depends on which backend the player used.
+    PULSE_PROP only reaches PipeWire through the Pulse compatibility
+    layer -- sox built against ALSA ignores it entirely and shows up
+    as "SoX" instead.
+
+    Matching is case-insensitive: sox reports "SoX", not "sox".
     """
-    for node in candidates:
-        if application and node.application == application:
-            return node
-    for node in candidates:
-        if name and node.name == name:
-            return node
-    for node in candidates:
-        if binary and node.binary == binary:
-            return node
-    # Last resort: substring, for players that decorate the name.
-    needle = (application or name or binary).lower()
-    if needle:
+    terms = [t for t in (application, name, binary) if t]
+    if not terms:
+        return None
+
+    def fields(node: Node) -> list[str]:
+        return [node.application, node.name, node.binary]
+
+    # Exact, case-insensitive, across all fields.
+    for term in terms:
+        lowered = term.lower()
         for node in candidates:
-            haystack = f'{node.application} {node.name} {node.binary}'
-            if needle in haystack.lower():
+            if any(f and f.lower() == lowered for f in fields(node)):
                 return node
+
+    # Substring, for players that decorate the name.
+    for term in terms:
+        lowered = term.lower()
+        for node in candidates:
+            haystack = ' '.join(f for f in fields(node) if f).lower()
+            if lowered in haystack:
+                return node
+
     return None
 
 
