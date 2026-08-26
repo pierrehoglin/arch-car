@@ -23,6 +23,7 @@ wifi         = "cli.wifi:main"
 hotspot      = "cli.hotspot:main"
 audio        = "cli.audio:main"
 fm           = "cli.fm:main"
+source       = "cli.source:main"
 can          = "cli.can:main"
 
 [tool.uv]
