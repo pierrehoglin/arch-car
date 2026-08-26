@@ -32,6 +32,7 @@ from carlib.core.errors import NotAvailableError, NotFoundError
 
 RTL_FM = 'rtl_fm'
 RTL_TEST = 'rtl_test'
+RTL_POWER = 'rtl_power'
 REDSEA = 'redsea'
 SOX = 'sox'
 PLAY = 'play'
@@ -60,6 +61,15 @@ AUDIO_LOWPASS = 15_000
 # they go to a file the status reader drains.
 RDS_MAX_BYTES = 1 << 20
 
+# Band scanning. 100 kHz bins match European channel spacing; a
+# station occupies roughly 200 kHz so it lands across two or three.
+SCAN_BIN_HZ = 100_000
+SCAN_INTEGRATION = 2          # seconds per sweep
+SCAN_THRESHOLD_DB = 8.0       # above the noise floor to count as a station
+SCAN_SEPARATION_MHZ = 0.3     # peaks closer than this are one station
+SCAN_FLOOR_WINDOW = 1.5       # MHz either side for the local noise floor
+SCAN_CACHE_SECONDS = 900      # re-sweep if the cache is older than this
+
 DEFAULT_GAIN = 40.0
 
 # How long to wait for the pipeline to prove it started. rtl_fm exits
@@ -77,6 +87,7 @@ def _runtime_dir() -> Path:
 
 STATE_FILE = _runtime_dir() / 'carlib-fm.json'
 RDS_FILE = _runtime_dir() / 'carlib-fm-rds.jsonl'
+SCAN_FILE = _runtime_dir() / 'carlib-fm-scan.json'
 PRESET_FILE = (
     Path(os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config'))
     / 'carlib' / 'fm-presets.json'
@@ -676,6 +687,277 @@ async def play(station: Station | float | str,
                  'Try rds=False to rule out redsea.')
 
     return await status()
+
+
+# --- Band scanning ---------------------------------------------------------
+
+@dataclass
+class Signal:
+    """A peak found while sweeping the band."""
+
+    frequency: float
+    power: float = 0.0          # dB above the noise floor
+    name: str = ''
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @property
+    def label(self) -> str:
+        return self.name or f'{self.frequency:.1f}'
+
+    @property
+    def bars(self) -> str:
+        """Signal strength as a five-step bar, 0-30 dB over the floor."""
+        filled = min(5, max(0, round(self.power / 6)))
+        return '#' * filled + '.' * (5 - filled)
+
+
+def parse_power_csv(text: str) -> list[tuple[float, float]]:
+    """
+    Parse rtl_power CSV into (MHz, dB) pairs.
+
+    Each row is:
+        date, time, freq_low, freq_high, freq_step, samples, db, db, ...
+
+    Bin N covers freq_low + N * freq_step.
+    """
+    bins = []
+
+    for line in text.splitlines():
+        parts = [p.strip() for p in line.split(',')]
+        if len(parts) < 7:
+            continue
+        try:
+            low = float(parts[2])
+            step = float(parts[4])
+        except ValueError:
+            continue
+
+        for index, value in enumerate(parts[6:]):
+            try:
+                power = float(value)
+            except ValueError:
+                continue
+            bins.append((round((low + index * step) / 1e6, 4), power))
+
+    bins.sort(key=lambda b: b[0])
+    return bins
+
+
+def _median(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    middle = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[middle]
+    return (ordered[middle - 1] + ordered[middle]) / 2.0
+
+
+def find_signals(bins: list[tuple[float, float]],
+                 threshold: float = SCAN_THRESHOLD_DB,
+                 separation: float = SCAN_SEPARATION_MHZ,
+                 window: float = SCAN_FLOOR_WINDOW) -> list[Signal]:
+    """
+    Pick stations out of a sweep.
+
+    The noise floor is measured locally -- a median over a window
+    either side of each bin -- rather than once across the whole band.
+    A global median breaks when part of the band sits elevated: on this
+    hardware 105.5-108 MHz runs about 15 dB hot from interference,
+    which drags a global floor up, hides real stations elsewhere and
+    makes the results move around as the threshold changes.
+
+    Peaks within `separation` are treated as one station, since a
+    200 kHz signal lands across several 100 kHz bins.
+    """
+    if not bins:
+        return []
+
+    powers = [power for _, power in bins]
+    freqs = [freq for freq, _ in bins]
+
+    candidates = []
+    for index, (freq, power) in enumerate(bins):
+        if not FM_MIN <= freq <= FM_MAX:
+            continue
+
+        # Bins within the window, by frequency rather than index, so
+        # gaps in the sweep do not distort it.
+        low = freq - window
+        high = freq + window
+        start = index
+        while start > 0 and freqs[start - 1] >= low:
+            start -= 1
+        end = index
+        while end < len(freqs) - 1 and freqs[end + 1] <= high:
+            end += 1
+
+        local = _median(powers[start:end + 1])
+        if power - local >= threshold:
+            candidates.append((freq, power - local))
+
+    if not candidates:
+        return []
+
+    signals = []
+    group = [candidates[0]]
+
+    for freq, power in candidates[1:]:
+        if freq - group[-1][0] <= separation:
+            group.append((freq, power))
+        else:
+            signals.append(_peak(group))
+            group = [(freq, power)]
+    signals.append(_peak(group))
+
+    return signals
+
+
+def _peak(group: list[tuple[float, float]]) -> Signal:
+    """Strongest bin in a group, snapped to the 100 kHz channel grid."""
+    frequency, power = max(group, key=lambda item: item[1])
+    return Signal(frequency=round(frequency, 1), power=round(power, 1))
+
+
+def load_scan() -> tuple[list[Signal], float]:
+    """Cached scan results and when they were taken."""
+    if not SCAN_FILE.exists():
+        return [], 0.0
+    try:
+        data = json.loads(SCAN_FILE.read_text())
+    except (OSError, json.JSONDecodeError):
+        return [], 0.0
+
+    signals = []
+    for entry in data.get('signals', []):
+        try:
+            signals.append(Signal(
+                frequency=float(entry['frequency']),
+                power=float(entry.get('power', 0.0)),
+                name=entry.get('name', ''),
+            ))
+        except (KeyError, TypeError, ValueError):
+            continue
+
+    return signals, float(data.get('taken', 0.0))
+
+
+def save_scan(signals: list[Signal]) -> None:
+    try:
+        SCAN_FILE.write_text(json.dumps({
+            'taken': time.time(),
+            'signals': [s.to_dict() for s in signals],
+        }))
+    except OSError:
+        pass
+
+
+async def scan(threshold: float = SCAN_THRESHOLD_DB,
+               integration: int = SCAN_INTEGRATION,
+               device: int = 0,
+               gain: float = DEFAULT_GAIN,
+               resume: bool = True) -> list[Signal]:
+    """
+    Sweep the FM band for stations.
+
+    One dongle cannot sweep and play at once, so playback stops for the
+    duration and restarts afterwards unless resume=False. A sweep takes
+    roughly `integration` seconds plus overhead.
+    """
+    previous = await status()
+
+    if previous.playing:
+        await stop()
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            RTL_POWER,
+            '-d', str(device),
+            '-f', f'{FM_MIN}M:{FM_MAX}M:{SCAN_BIN_HZ}',
+            '-g', f'{gain:g}',
+            '-i', str(integration),
+            '-1',
+            '-',
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+    except FileNotFoundError as exc:
+        raise NotAvailableError(
+            'rtl_power not found',
+            hint='pacman -S rtl-sdr') from exc
+
+    try:
+        out, _ = await asyncio.wait_for(
+            proc.communicate(), timeout=integration * 4 + 20)
+    except asyncio.TimeoutError:
+        proc.kill()
+        raise NotAvailableError('scan timed out')
+
+    signals = find_signals(parse_power_csv(out.decode(errors='replace')),
+                           threshold=threshold)
+
+    # Carry preset names through so a scan list reads like a station
+    # list rather than a column of numbers.
+    for signal in signals:
+        preset = find_preset(signal.frequency)
+        if preset:
+            signal.name = preset.name
+
+    save_scan(signals)
+
+    if resume and previous.playing and previous.frequency is not None:
+        await play(previous.frequency, gain=previous.gain)
+
+    return signals
+
+
+async def known_signals(max_age: float = SCAN_CACHE_SECONDS,
+                        **scan_kwargs) -> list[Signal]:
+    """
+    Cached scan results, sweeping first if they are stale or absent.
+
+    Seeking should not re-sweep on every press -- that would stop the
+    audio each time.
+    """
+    signals, taken = load_scan()
+    if signals and (time.time() - taken) < max_age:
+        return signals
+    return await scan(**scan_kwargs)
+
+
+async def seek(direction: int = 1,
+               max_age: float = SCAN_CACHE_SECONDS) -> RadioState:
+    """
+    Tune to the next station up or down the band, wrapping around.
+
+    Unlike `next_preset`, this uses what is actually on the air rather
+    than what you saved earlier -- which is what you want in a moving
+    car.
+    """
+    signals = await known_signals(max_age=max_age)
+    if not signals:
+        raise NotFoundError('station', 'any', [])
+
+    current = await status()
+    frequencies = [s.frequency for s in signals]
+
+    if not current.playing or current.frequency is None:
+        return await play(frequencies[0])
+
+    here = current.frequency
+
+    if direction >= 0:
+        nxt = next((f for f in frequencies if f > here + 0.05),
+                   frequencies[0])
+    else:
+        lower = [f for f in frequencies if f < here - 0.05]
+        nxt = lower[-1] if lower else frequencies[-1]
+
+    data = _read_state()
+    return await play(nxt, gain=current.gain,
+                      rds=data.get('rds_enabled', True))
 
 
 async def tune(offset: float) -> RadioState:

@@ -102,6 +102,36 @@ async def cmd_down(args) -> None:
     emit_json(state) if args.json else show(state)
 
 
+async def cmd_scan(args) -> None:
+    """Sweep the band. Interrupts playback for a couple of seconds."""
+    if not args.json:
+        print('scanning...', file=sys.stderr)
+
+    signals = await fm.scan(threshold=args.threshold,
+                            integration=args.integration,
+                            gain=args.gain,
+                            resume=not args.no_resume)
+    if args.json:
+        emit_json(signals)
+        return
+
+    if not signals:
+        print('no stations found')
+        print('try a lower --threshold, more --gain, or a better '
+              'antenna', file=sys.stderr)
+        return
+
+    for signal in signals:
+        print(f'{signal.bars}  {signal.frequency:>6.1f}  '
+              f'{signal.power:>5.1f} dB  {signal.name}')
+    print(f'\n{len(signals)} stations', file=sys.stderr)
+
+
+async def cmd_seek(args) -> None:
+    state = await fm.seek(args.direction)
+    emit_json(state) if args.json else show(state)
+
+
 async def cmd_next(args) -> None:
     state = await fm.next_preset(1)
     emit_json(state) if args.json else show(state)
@@ -151,6 +181,7 @@ async def cmd_presets(args) -> None:
     if not stations:
         print('no presets')
         print('add one with: fm save 92.7 P3', file=sys.stderr)
+        print('or find what is on air with: fm scan', file=sys.stderr)
         return
 
     current = await fm.status()
@@ -278,6 +309,25 @@ def main() -> int:
         sp.set_defaults(fn=fn)
         sp.add_argument('step', type=float, nargs='?', default=STEP,
                         help=f'MHz to step (default {STEP})')
+
+    p = sub.add_parser('scan', parents=[common],
+                       help='sweep the band for stations')
+    p.set_defaults(fn=cmd_scan)
+    p.add_argument('--threshold', type=float,
+                   default=fm.SCAN_THRESHOLD_DB,
+                   help='dB above the local noise floor to count')
+    p.add_argument('--integration', type=int,
+                   default=fm.SCAN_INTEGRATION,
+                   help='seconds per sweep; longer finds weaker signals')
+    p.add_argument('--gain', type=float, default=fm.DEFAULT_GAIN)
+    p.add_argument('--no-resume', action='store_true',
+                   help='do not restart playback afterwards')
+
+    for name, fn, direction, help_text in (
+            ('seek-up', cmd_seek, 1, 'next station up the band'),
+            ('seek-down', cmd_seek, -1, 'next station down the band')):
+        sp = sub.add_parser(name, parents=[common], help=help_text)
+        sp.set_defaults(fn=fn, direction=direction)
 
     p = sub.add_parser('save', parents=[common], help='save a preset')
     p.set_defaults(fn=cmd_save)
