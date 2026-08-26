@@ -70,6 +70,11 @@ SCAN_SEPARATION_MHZ = 0.3     # peaks closer than this are one station
 SCAN_FLOOR_WINDOW = 1.5       # MHz either side for the local noise floor
 SCAN_CACHE_SECONDS = 900      # re-sweep if the cache is older than this
 
+# Seconds to sit on a frequency waiting for RDS when identifying. PS
+# repeats roughly every 2 seconds on a good signal, slower on a weak
+# one.
+IDENTIFY_SECONDS = 5.0
+
 DEFAULT_GAIN = 40.0
 
 # How long to wait for the pipeline to prove it started. rtl_fm exits
@@ -88,10 +93,16 @@ def _runtime_dir() -> Path:
 STATE_FILE = _runtime_dir() / 'carlib-fm.json'
 RDS_FILE = _runtime_dir() / 'carlib-fm-rds.jsonl'
 SCAN_FILE = _runtime_dir() / 'carlib-fm-scan.json'
-PRESET_FILE = (
+_CONFIG_DIR = (
     Path(os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config'))
-    / 'carlib' / 'fm-presets.json'
+    / 'carlib'
 )
+PRESET_FILE = _CONFIG_DIR / 'fm-presets.json'
+
+# Last station played. In the config directory rather than the runtime
+# one so it survives a reboot -- the point is that the car radio comes
+# back on the station you left it on.
+LAST_FILE = _CONFIG_DIR / 'fm-last.json'
 
 
 @dataclass
@@ -397,6 +408,44 @@ def resolve_station(value: str) -> Station:
     return existing or Station(frequency=frequency)
 
 
+# --- Last played -----------------------------------------------------------
+
+def save_last(frequency: float, name: str = '',
+              gain: float = DEFAULT_GAIN) -> None:
+    try:
+        _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        LAST_FILE.write_text(json.dumps({
+            'frequency': frequency,
+            'name': name,
+            'gain': gain,
+        }))
+    except OSError:
+        pass
+
+
+def load_last() -> Station | None:
+    """The station playing when the radio was last stopped."""
+    if not LAST_FILE.exists():
+        return None
+    try:
+        data = json.loads(LAST_FILE.read_text())
+        return Station(frequency=float(data['frequency']),
+                       name=data.get('name', ''))
+    except (OSError, json.JSONDecodeError, KeyError, TypeError,
+            ValueError):
+        return None
+
+
+def last_gain() -> float:
+    if not LAST_FILE.exists():
+        return DEFAULT_GAIN
+    try:
+        return float(json.loads(LAST_FILE.read_text()).get(
+            'gain', DEFAULT_GAIN))
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return DEFAULT_GAIN
+
+
 # --- Process state ---------------------------------------------------------
 
 def _read_state() -> dict:
@@ -607,24 +656,47 @@ async def stop() -> RadioState:
     return RadioState(playing=False)
 
 
-async def play(station: Station | float | str,
-               gain: float = DEFAULT_GAIN,
+async def play(station: Station | float | str | None = None,
+               gain: float | None = None,
                device: int = 0,
                squelch: int = 0,
                rds: bool = True) -> RadioState:
     """
     Tune and start playing. Replaces whatever was playing before.
 
+    With no station, resumes whatever was playing last -- which is what
+    a car radio does when you turn it on. Falls back to the first
+    preset, then to the first station a scan found.
+
     Only one RTL-SDR stream can run at a time, so this stops the
     existing pipeline first rather than failing on a busy device.
     """
-    if isinstance(station, Station):
+    if station is None:
+        target = load_last()
+        if target is None:
+            presets = load_presets()
+            target = presets[0] if presets else None
+        if target is None:
+            signals, _ = load_scan()
+            if signals:
+                target = Station(frequency=signals[0].frequency,
+                                 name=signals[0].name)
+        if target is None:
+            raise NotFoundError(
+                'station', 'last played',
+                ['nothing played yet -- give a frequency, or run scan'])
+        if gain is None:
+            gain = last_gain()
+    elif isinstance(station, Station):
         target = station
     elif isinstance(station, (int, float)):
         frequency = parse_frequency(station)
         target = find_preset(frequency) or Station(frequency=frequency)
     else:
         target = resolve_station(station)
+
+    if gain is None:
+        gain = DEFAULT_GAIN
 
     previous = _read_state().get('pid')
     await stop()
@@ -673,6 +745,8 @@ async def play(station: Station | float | str,
         'rds': {},
     })
 
+    save_last(target.frequency, target.name, gain)
+
     # rtl_fm exits almost immediately on a missing or busy device, so
     # a short settle catches the common failures rather than reporting
     # success for a pipeline that already died.
@@ -696,11 +770,23 @@ class Signal:
     """A peak found while sweeping the band."""
 
     frequency: float
-    power: float = 0.0          # dB above the noise floor
-    name: str = ''
+    power: float = 0.0          # dB above the local noise floor
+    name: str = ''              # preset name, or RDS if identified
+    rds_name: str = ''          # what the station calls itself
+    pi: str = ''                # RDS programme identification
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+    @property
+    def identified(self) -> bool:
+        """
+        Whether RDS confirmed a real station here.
+
+        Almost every broadcast station carries RDS, so a peak with none
+        is usually noise or too weak to be worth tuning.
+        """
+        return bool(self.rds_name or self.pi)
 
     @property
     def label(self) -> str:
@@ -837,6 +923,8 @@ def load_scan() -> tuple[list[Signal], float]:
                 frequency=float(entry['frequency']),
                 power=float(entry.get('power', 0.0)),
                 name=entry.get('name', ''),
+                rds_name=entry.get('rds_name', ''),
+                pi=entry.get('pi', ''),
             ))
         except (KeyError, TypeError, ValueError):
             continue
@@ -858,13 +946,24 @@ async def scan(threshold: float = SCAN_THRESHOLD_DB,
                integration: int = SCAN_INTEGRATION,
                device: int = 0,
                gain: float = DEFAULT_GAIN,
-               resume: bool = True) -> list[Signal]:
+               resume: bool = True,
+               identify_stations: bool = False,
+               identify_seconds: float = IDENTIFY_SECONDS,
+               progress=None) -> list[Signal]:
     """
     Sweep the FM band for stations.
 
     One dongle cannot sweep and play at once, so playback stops for the
     duration and restarts afterwards unless resume=False. A sweep takes
     roughly `integration` seconds plus overhead.
+
+    With identify_stations, each peak is then tuned in turn to read its
+    RDS name. That costs a few seconds per station but is the only
+    reliable way to tell a real broadcast from a noise peak -- an
+    unidentified frequency is usually the latter.
+
+    `progress` is called with (index, total, Signal) before each
+    identification, so a CLI can say what it is doing.
     """
     previous = await status()
 
@@ -905,12 +1004,92 @@ async def scan(threshold: float = SCAN_THRESHOLD_DB,
         if preset:
             signal.name = preset.name
 
+    if identify_stations:
+        for index, signal in enumerate(signals):
+            if progress:
+                progress(index, len(signals), signal)
+            try:
+                rds = await identify(signal.frequency,
+                                     seconds=identify_seconds,
+                                     gain=gain, device=device)
+            except NotAvailableError:
+                break       # redsea missing; leave the rest unnamed
+            signal.rds_name = rds.ps
+            signal.pi = rds.pi
+            if rds.ps and not signal.name:
+                signal.name = rds.ps
+
     save_scan(signals)
 
     if resume and previous.playing and previous.frequency is not None:
         await play(previous.frequency, gain=previous.gain)
 
     return signals
+
+
+async def identify(frequency: float,
+                   seconds: float = IDENTIFY_SECONDS,
+                   gain: float = DEFAULT_GAIN,
+                   device: int = 0) -> Rds:
+    """
+    Tune briefly and read whatever RDS comes back.
+
+    This is also a decent test of whether a peak is a real station:
+    broadcast stations almost all carry RDS, so a frequency that
+    yields nothing after a few seconds is usually noise or a very weak
+    signal.
+
+    Stops any playback -- one dongle.
+    """
+    await stop()
+
+    command = (
+        f'{RTL_FM} -d {device} -f {frequency:.1f}M -M fm -l 0 '
+        f'-A std -p 0 -s {MPX_RATE} -g {gain:g} -F 9 - '
+        f'| {REDSEA} -r {MPX_RATE}'
+    )
+
+    try:
+        proc = await asyncio.create_subprocess_shell(
+            command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except FileNotFoundError as exc:
+        raise NotAvailableError(
+            'cannot start rtl_fm or redsea',
+            hint='pacman -S rtl-sdr, and build redsea') from exc
+
+    rds = Rds()
+    deadline = time.monotonic() + seconds
+
+    try:
+        while time.monotonic() < deadline:
+            remaining = deadline - time.monotonic()
+            try:
+                line = await asyncio.wait_for(proc.stdout.readline(),
+                                              timeout=remaining)
+            except asyncio.TimeoutError:
+                break
+            if not line:
+                break
+            parse_rds(line.decode(errors='replace'), into=rds)
+            # Stop early once the station has named itself.
+            if rds.ps:
+                break
+    finally:
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=2.0)
+        except (asyncio.TimeoutError, ProcessLookupError):
+            pass
+        await asyncio.sleep(0.3)        # let the USB device settle
+
+    return rds
 
 
 async def known_signals(max_age: float = SCAN_CACHE_SECONDS,

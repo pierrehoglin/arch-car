@@ -3,11 +3,15 @@
 FM radio via RTL-SDR.
 
     fm                          # what is playing
+    fm play                     # resume the last station
     fm play 92.7
     fm play P3                  # by preset name
     fm stop
     fm up / fm down             # step 0.1 MHz
     fm next / fm prev           # step through presets
+    fm scan                     # find what is on air
+    fm scan --identify          # ...and name them via RDS
+    fm seek-up / fm seek-down
     fm presets
     fm save 92.7 P3
     fm forget 92.7
@@ -107,10 +111,16 @@ async def cmd_scan(args) -> None:
     if not args.json:
         print('scanning...', file=sys.stderr)
 
+    def progress(index, total, signal):
+        print(f'  identifying {index + 1}/{total}: '
+              f'{signal.frequency:.1f} MHz...', file=sys.stderr)
+
     signals = await fm.scan(threshold=args.threshold,
                             integration=args.integration,
                             gain=args.gain,
-                            resume=not args.no_resume)
+                            resume=not args.no_resume,
+                            identify_stations=args.identify,
+                            progress=progress if args.identify else None)
     if args.json:
         emit_json(signals)
         return
@@ -121,10 +131,25 @@ async def cmd_scan(args) -> None:
               'antenna', file=sys.stderr)
         return
 
+    identified = sum(1 for s in signals if s.identified)
+
     for signal in signals:
-        print(f'{signal.bars}  {signal.frequency:>6.1f}  '
-              f'{signal.power:>5.1f} dB  {signal.name}')
-    print(f'\n{len(signals)} stations', file=sys.stderr)
+        if args.identify:
+            mark = ' ' if signal.identified else '?'
+        else:
+            mark = ' '
+        name = signal.rds_name or signal.name
+        print(f'{mark} {signal.bars}  {signal.frequency:>6.1f}  '
+              f'{signal.power:>5.1f} dB  {name}')
+
+    print(f'\n{len(signals)} peaks', file=sys.stderr)
+    if args.identify:
+        print(f'{identified} identified by RDS; '
+              f'"?" means none found -- usually noise or too weak',
+              file=sys.stderr)
+    else:
+        print('run with --identify to name them and filter out noise',
+              file=sys.stderr)
 
 
 async def cmd_seek(args) -> None:
@@ -293,9 +318,12 @@ def main() -> int:
     p = sub.add_parser('play', parents=[common],
                        help='tune and play')
     p.set_defaults(fn=cmd_play)
-    p.add_argument('station', help='frequency or preset name')
-    p.add_argument('--gain', type=float, default=fm.DEFAULT_GAIN,
-                   help=f'tuner gain in dB (default {fm.DEFAULT_GAIN:g})')
+    p.add_argument('station', nargs='?', default=None,
+                   help='frequency or preset name; omit to resume the '
+                        'last station played')
+    p.add_argument('--gain', type=float, default=None,
+                   help='tuner gain in dB; defaults to whatever was '
+                        'last used')
     p.add_argument('--device', type=int, default=0)
     p.add_argument('--squelch', type=int, default=0,
                    help='silence below this level; 0 disables')
@@ -322,6 +350,9 @@ def main() -> int:
     p.add_argument('--gain', type=float, default=fm.DEFAULT_GAIN)
     p.add_argument('--no-resume', action='store_true',
                    help='do not restart playback afterwards')
+    p.add_argument('--identify', action='store_true',
+                   help='tune each peak to read its RDS name; slower, '
+                        'but tells real stations from noise')
 
     for name, fn, direction, help_text in (
             ('seek-up', cmd_seek, 1, 'next station up the band'),
