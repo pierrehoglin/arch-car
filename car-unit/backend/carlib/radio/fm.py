@@ -114,10 +114,9 @@ def parse_frequency(value: str | float | int) -> float:
 
         92.7        -> 92.7
         '92.7'      -> 92.7
-        '92,7'      -> 92.7     (Swedish decimal comma)
         '92.7M'     -> 92.7
         '92700000'  -> 92.7     (Hz)
-        '92700'     -> 92.7     (kHz)
+        '92700k'    -> 92.7     (kHz)
 
     Raises ValueError rather than guessing when the result falls
     outside the broadcast band -- tuning 9.27 MHz because someone
@@ -126,7 +125,7 @@ def parse_frequency(value: str | float | int) -> float:
     if isinstance(value, (int, float)):
         mhz = float(value)
     else:
-        text = str(value).strip().lower().replace(',', '.')
+        text = str(value).strip().lower()
         text = text.removesuffix('hz').removesuffix('fm').strip()
 
         multiplier = 1.0
@@ -262,12 +261,24 @@ def _clear_state() -> None:
         pass
 
 
-def _alive(pid: int) -> bool:
-    """Whether the process group still exists."""
+def _alive(pgid: int) -> bool:
+    """
+    Whether any process in the group is still running.
+
+    The recorded pid IS the process group id, because the pipeline is
+    started with start_new_session=True. Using it directly rather than
+    calling os.getpgid() matters: the shell often exits while rtl_fm
+    and play keep running, and os.getpgid() on a dead leader raises --
+    which would report the radio as stopped while it is still playing.
+    """
     try:
-        os.killpg(os.getpgid(pid), 0)
+        os.killpg(pgid, 0)
         return True
-    except (ProcessLookupError, PermissionError, OSError):
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True         # exists, owned by someone else
+    except OSError:
         return False
 
 
@@ -372,24 +383,26 @@ async def stop() -> RadioState:
     'device busy'.
     """
     data = _read_state()
-    pid = data.get('pid')
+    pgid = data.get('pid')
 
-    if pid and _alive(pid):
+    if pgid and _alive(pgid):
         try:
-            os.killpg(os.getpgid(pid), signal.SIGTERM)
+            os.killpg(pgid, signal.SIGTERM)
         except (ProcessLookupError, PermissionError, OSError):
             pass
 
-        # Give it a moment, then insist.
+        # Give it a moment, then insist. rtl_fm can sit in a USB read
+        # and ignore SIGTERM until that returns.
         for _ in range(20):
-            if not _alive(pid):
+            if not _alive(pgid):
                 break
             await asyncio.sleep(0.1)
         else:
             try:
-                os.killpg(os.getpgid(pid), signal.SIGKILL)
+                os.killpg(pgid, signal.SIGKILL)
             except (ProcessLookupError, PermissionError, OSError):
                 pass
+            await asyncio.sleep(0.2)
 
     _clear_state()
     return RadioState(playing=False)
@@ -413,7 +426,19 @@ async def play(station: Station | float | str,
     else:
         target = resolve_station(station)
 
+    previous = _read_state().get('pid')
     await stop()
+
+    # The USB device is not free the instant the process group dies --
+    # the kernel has to tear the transfers down. Starting rtl_fm too
+    # soon gives 'usb_claim_interface error -6' and the new pipeline
+    # exits immediately, which looks like a tuning failure.
+    if previous:
+        for _ in range(20):
+            if not _alive(previous):
+                break
+            await asyncio.sleep(0.1)
+        await asyncio.sleep(0.3)
 
     command = build_command(target.frequency, gain, device, squelch)
 
