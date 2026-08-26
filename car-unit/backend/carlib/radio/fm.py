@@ -32,6 +32,8 @@ from carlib.core.errors import NotAvailableError, NotFoundError
 
 RTL_FM = 'rtl_fm'
 RTL_TEST = 'rtl_test'
+REDSEA = 'redsea'
+SOX = 'sox'
 PLAY = 'play'
 
 # FM broadcast band. Japan and a few other places differ, but this is
@@ -43,6 +45,20 @@ FM_MAX = 108.0
 # carries to the player.
 DEMOD_RATE = 200_000
 AUDIO_RATE = 48_000
+
+# RDS needs the raw MPX composite at redsea's native rate. This is a
+# different demodulator mode (-M fm, not -M wbfm) and a different rate,
+# which is why RDS and plain playback cannot share one rtl_fm.
+MPX_RATE = 171_000
+
+# Audio is the mono sum below 15 kHz; the 19 kHz pilot, 38 kHz stereo
+# subcarrier and 57 kHz RDS carrier all sit above it and get filtered
+# out. That makes playback mono -- rtl_fm has no stereo decoder.
+AUDIO_LOWPASS = 15_000
+
+# redsea writes RDS groups to stderr when feeding audio through, so
+# they go to a file the status reader drains.
+RDS_MAX_BYTES = 1 << 20
 
 DEFAULT_GAIN = 40.0
 
@@ -60,6 +76,7 @@ def _runtime_dir() -> Path:
 
 
 STATE_FILE = _runtime_dir() / 'carlib-fm.json'
+RDS_FILE = _runtime_dir() / 'carlib-fm-rds.jsonl'
 PRESET_FILE = (
     Path(os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config'))
     / 'carlib' / 'fm-presets.json'
@@ -80,6 +97,135 @@ class Station:
 
 
 @dataclass
+class Rds:
+    """
+    Decoded RDS, accumulated from the group stream.
+
+    Each redsea line is one group carrying a fragment, so nothing here
+    arrives in a single message -- the fields fill in over a few
+    seconds as groups repeat.
+    """
+
+    pi: str = ''                    # station id, stable
+    ps: str = ''                    # 8-char station name
+    radiotext: str = ''             # 64-char now-playing or slogan
+    program_type: str = ''
+    alt_frequencies: list[float] = field(default_factory=list)
+    traffic_program: bool = False   # station carries traffic news
+    traffic_announcement: bool = False   # bulletin on air NOW
+    is_music: bool | None = None
+    stereo: bool | None = None
+    groups: int = 0
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @property
+    def name(self) -> str:
+        return self.ps
+
+    @property
+    def has_data(self) -> bool:
+        return bool(self.pi or self.ps or self.radiotext)
+
+
+def parse_rds(text: str, into: 'Rds | None' = None) -> Rds:
+    """
+    Fold redsea's newline-delimited JSON into one Rds.
+
+    Later values win, so replaying the whole stream leaves the most
+    recent state. Fields absent from a group are left alone rather
+    than cleared -- PS appears in maybe one group in ten, and blanking
+    it in between would make the display flicker.
+    """
+    rds = into or Rds()
+
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or not line.startswith('{'):
+            continue
+        try:
+            group = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+
+        rds.groups += 1
+
+        if 'pi' in group:
+            rds.pi = str(group['pi'])
+        if 'prog_type' in group:
+            rds.program_type = str(group['prog_type'])
+        if 'tp' in group:
+            rds.traffic_program = bool(group['tp'])
+        if 'ta' in group:
+            rds.traffic_announcement = bool(group['ta'])
+        if 'is_music' in group:
+            rds.is_music = bool(group['is_music'])
+
+        # PS is transmitted space-padded to 8 characters.
+        for key in ('ps', 'partial_ps'):
+            if key in group:
+                value = str(group[key]).strip()
+                if value:
+                    rds.ps = value
+                break
+
+        for key in ('radiotext', 'partial_radiotext'):
+            if key in group:
+                value = str(group[key]).strip()
+                if value:
+                    rds.radiotext = value
+                break
+
+        # redsea reports AF in kHz.
+        for key in ('alt_frequencies_a', 'alt_frequencies_b',
+                    'partial_alt_frequencies_a'):
+            if key in group and group[key]:
+                try:
+                    freqs = sorted({round(float(f) / 1000.0, 1)
+                                    for f in group[key]})
+                except (TypeError, ValueError):
+                    continue
+                rds.alt_frequencies = freqs
+                break
+
+        di = group.get('di')
+        if isinstance(di, dict) and 'stereo' in di:
+            rds.stereo = bool(di['stereo'])
+
+    return rds
+
+
+def read_rds() -> Rds:
+    """
+    Drain the RDS file into an Rds, then truncate it.
+
+    Truncating on read bounds the file: it lives in XDG_RUNTIME_DIR,
+    which is tmpfs, and redsea emits roughly 1.5 kB/s. Anything that
+    polls -- a status bar, the CLI -- keeps it small. The size cap
+    handles the case where nothing polls for hours.
+    """
+    if not RDS_FILE.exists():
+        return Rds()
+
+    try:
+        size = RDS_FILE.stat().st_size
+        with open(RDS_FILE, 'r', errors='replace') as handle:
+            if size > RDS_MAX_BYTES:
+                handle.seek(size - RDS_MAX_BYTES)
+                handle.readline()       # discard the partial line
+            text = handle.read()
+        # Truncate rather than delete: redsea holds the fd open, and
+        # unlinking would leave it writing to a file nobody can read.
+        with open(RDS_FILE, 'w'):
+            pass
+    except OSError:
+        return Rds()
+
+    return parse_rds(text)
+
+
+@dataclass
 class RadioState:
     playing: bool = False
     frequency: float | None = None
@@ -87,6 +233,7 @@ class RadioState:
     gain: float = DEFAULT_GAIN
     pid: int | None = None
     started: float | None = None
+    rds: Rds = field(default_factory=Rds)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -95,8 +242,11 @@ class RadioState:
     def label(self) -> str:
         if not self.playing or self.frequency is None:
             return 'off'
-        if self.name:
-            return f'{self.name}  {self.frequency:.1f}'
+        # RDS wins over a saved preset name -- it is what the station
+        # currently calls itself.
+        name = self.rds.ps or self.name
+        if name:
+            return f'{name}  {self.frequency:.1f}'
         return f'{self.frequency:.1f} FM'
 
     @property
@@ -330,17 +480,35 @@ async def devices() -> list[str]:
 # --- Playback --------------------------------------------------------------
 
 def build_command(frequency: float, gain: float = DEFAULT_GAIN,
-                  device: int = 0, squelch: int = 0) -> str:
+                  device: int = 0, squelch: int = 0,
+                  rds: bool = True) -> str:
     """
-    The rtl_fm pipeline, as a shell string.
+    The playback pipeline, as a shell string.
 
-    A shell is used rather than two coupled subprocesses because the
-    pipe between them is what does the work, and letting the shell own
-    it means one process group to signal.
+    A shell is used rather than coupled subprocesses because the pipes
+    are what do the work, and letting the shell own them means one
+    process group to signal.
+
+    With RDS, rtl_fm runs in raw MPX mode and redsea sits in the middle
+    with --feed-through: it echoes the signal onward and writes decoded
+    groups to stderr. sox then filters the composite down to the mono
+    audio and resamples for the player.
+
+    Without RDS it is the simpler wbfm path, which costs less CPU.
     """
+    if not rds:
+        return (
+            f'{RTL_FM} -d {device} -f {frequency:.1f}M -M wbfm '
+            f'-s {DEMOD_RATE} -r {AUDIO_RATE} -g {gain:g} -l {squelch} '
+            f'| {PLAY} -q -r {AUDIO_RATE} -t raw -e s -b 16 -c 1 -'
+        )
+
     return (
-        f'{RTL_FM} -d {device} -f {frequency:.1f}M -M wbfm '
-        f'-s {DEMOD_RATE} -r {AUDIO_RATE} -g {gain:g} -l {squelch} '
+        f'{RTL_FM} -d {device} -f {frequency:.1f}M -M fm -l {squelch} '
+        f'-A std -p 0 -s {MPX_RATE} -g {gain:g} -F 9 - '
+        f'| {REDSEA} -e -r {MPX_RATE} 2>>"{RDS_FILE}" '
+        f'| {SOX} -q -r {MPX_RATE} -t raw -e s -b 16 -c 1 - '
+        f'-t raw -r {AUDIO_RATE} - lowpass {AUDIO_LOWPASS} '
         f'| {PLAY} -q -r {AUDIO_RATE} -t raw -e s -b 16 -c 1 -'
     )
 
@@ -364,6 +532,25 @@ async def status() -> RadioState:
         if preset:
             name = preset.name
 
+    # Drain any new RDS groups and merge them into what we already
+    # know. Cached in the state file so a fresh read does not lose the
+    # station name between polls.
+    cached = data.get('rds') or {}
+    rds = Rds(**{k: v for k, v in cached.items()
+                 if k in Rds.__dataclass_fields__})
+
+    if data.get('rds_enabled', True):
+        fresh = read_rds()
+        if fresh.groups:
+            rds = parse_rds('', into=rds)
+            for name_, value in vars(fresh).items():
+                if name_ == 'groups':
+                    rds.groups += value
+                elif value not in ('', None, [], False):
+                    setattr(rds, name_, value)
+            data['rds'] = rds.to_dict()
+            _write_state(data)
+
     return RadioState(
         playing=True,
         frequency=frequency,
@@ -371,6 +558,7 @@ async def status() -> RadioState:
         gain=data.get('gain', DEFAULT_GAIN),
         pid=pid,
         started=data.get('started'),
+        rds=rds,
     )
 
 
@@ -411,7 +599,8 @@ async def stop() -> RadioState:
 async def play(station: Station | float | str,
                gain: float = DEFAULT_GAIN,
                device: int = 0,
-               squelch: int = 0) -> RadioState:
+               squelch: int = 0,
+               rds: bool = True) -> RadioState:
     """
     Tune and start playing. Replaces whatever was playing before.
 
@@ -440,7 +629,15 @@ async def play(station: Station | float | str,
             await asyncio.sleep(0.1)
         await asyncio.sleep(0.3)
 
-    command = build_command(target.frequency, gain, device, squelch)
+    # Start with an empty RDS file so the previous station's
+    # groups are not attributed to this one.
+    try:
+        RDS_FILE.write_text('')
+    except OSError:
+        pass
+
+    command = build_command(target.frequency, gain, device,
+                            squelch, rds)
 
     try:
         proc = await asyncio.create_subprocess_shell(
@@ -452,7 +649,7 @@ async def play(station: Station | float | str,
     except FileNotFoundError as exc:
         raise NotAvailableError(
             'cannot start playback',
-            hint='pacman -S rtl-sdr sox') from exc
+            hint='pacman -S rtl-sdr sox, and build redsea') from exc
 
     _write_state({
         'pid': proc.pid,
@@ -461,6 +658,8 @@ async def play(station: Station | float | str,
         'gain': gain,
         'device': device,
         'started': time.time(),
+        'rds_enabled': rds,
+        'rds': {},
     })
 
     # rtl_fm exits almost immediately on a missing or busy device, so
@@ -473,7 +672,8 @@ async def play(station: Station | float | str,
         raise NotAvailableError(
             f'playback stopped immediately on {target.frequency:.1f} MHz',
             hint='check `rtl_test` sees the dongle and nothing else is '
-                 'using it, and that sox is installed')
+                 'using it, and that sox and redsea are installed. '
+                 'Try rds=False to rule out redsea.')
 
     return await status()
 
@@ -490,7 +690,9 @@ async def tune(offset: float) -> RadioState:
         raise NotAvailableError('nothing is playing')
 
     frequency = parse_frequency(current.frequency + offset)
-    return await play(frequency, gain=current.gain)
+    data = _read_state()
+    return await play(frequency, gain=current.gain,
+                      rds=data.get('rds_enabled', True))
 
 
 async def next_preset(step: int = 1) -> RadioState:
@@ -509,5 +711,7 @@ async def next_preset(step: int = 1) -> RadioState:
             index = i
             break
 
+    data = _read_state()
     return await play(presets[(index + step) % len(presets)],
-                      gain=current.gain)
+                      gain=current.gain,
+                      rds=data.get('rds_enabled', True))
