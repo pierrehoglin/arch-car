@@ -16,6 +16,7 @@ the fix mode, and 2 or 3 means you have one.
 """
 
 import re
+import asyncio
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone, date as date_type
 from typing import AsyncIterator
@@ -367,6 +368,114 @@ async def enable(match: str | None = None,
 async def disable(match: str | None = None) -> None:
     modem = await resolve(match)
     await mm.location_proxy(modem.path).setup(mm.SOURCE_NONE, False)
+
+
+# --- Keeping GPS on --------------------------------------------------------
+#
+# Location gathering is runtime state. It resets whenever ModemManager
+# restarts, and a freshly enumerated modem starts with only the coarse
+# cell source enabled. There is no config file for it -- the only way
+# to keep GPS on is to notice it has gone off and turn it back on.
+
+@dataclass
+class EnsureResult:
+    """What ensure_enabled() found and did."""
+
+    modem: mm.ModemInfo | None = None
+    changed: bool = False
+    reason: str = ''
+    rate_changed: bool = False
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+async def ensure_enabled(match: str | None = None,
+                         nmea: bool = True,
+                         raw: bool = True,
+                         assisted: bool = False,
+                         refresh_rate: int | None = None) -> EnsureResult:
+    """
+    Enable GPS only if it is not already on. Safe to call repeatedly.
+
+    Returns what it found, so a supervisor can log transitions rather
+    than every poll.
+    """
+    modems_found = await mm.modems()
+    if not modems_found:
+        return EnsureResult(reason='no modem')
+
+    modem = select_optional(
+        modems_found, match,
+        what='modem',
+        keys=lambda m: (m.path, m.model, m.manufacturer),
+        label=lambda m: m.model or m.path,
+    )
+
+    if not modem.has_gps:
+        return EnsureResult(modem=modem, reason='modem has no GPS')
+
+    result = EnsureResult(modem=modem)
+
+    if not modem.gps_active:
+        modem = await enable(match=modem.path, nmea=nmea, raw=raw,
+                             assisted=assisted)
+        result.modem = modem
+        result.changed = True
+        result.reason = 'enabled'
+    else:
+        result.reason = 'already enabled'
+
+    if refresh_rate is not None:
+        proxy = mm.location_proxy(modem.path)
+        try:
+            if await proxy.gps_refresh_rate != refresh_rate:
+                await proxy.set_gps_refresh_rate(refresh_rate)
+                result.rate_changed = True
+        except Exception:
+            pass        # not fatal; the fix still works at the default
+
+    return result
+
+
+async def supervise(interval: float = 10.0,
+                    match: str | None = None,
+                    nmea: bool = True,
+                    raw: bool = True,
+                    assisted: bool = False,
+                    refresh_rate: int | None = None
+                    ) -> AsyncIterator[EnsureResult]:
+    """
+    Keep GPS enabled, yielding only when something changes.
+
+    Polling rather than subscribing to ModemManager's signals is
+    deliberate. A signal subscription dies with the bus name when
+    ModemManager restarts, which is exactly the case this needs to
+    survive -- and it is the case that reset your sources when the
+    modem index moved from Modem/0 to Modem/1. A poll notices
+    regardless, has no reconnection logic to get wrong, and a few
+    seconds of latency on enabling GPS costs nothing.
+
+        async for event in gps.supervise(refresh_rate=1):
+            log(event.reason)
+    """
+    previous = None
+
+    while True:
+        try:
+            result = await ensure_enabled(
+                match=match, nmea=nmea, raw=raw,
+                assisted=assisted, refresh_rate=refresh_rate)
+        except Exception as exc:
+            result = EnsureResult(reason=f'error: {exc}')
+
+        # Report transitions, not every poll.
+        state = (result.reason, result.changed, result.rate_changed)
+        if state != previous or result.changed:
+            yield result
+            previous = state
+
+        await asyncio.sleep(interval)
 
 
 async def set_refresh_rate(seconds: int, match: str | None = None) -> int:

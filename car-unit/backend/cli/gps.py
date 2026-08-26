@@ -30,6 +30,7 @@ Needs polkit authorisation, or sudo. To avoid sudo:
 
 import sys
 import argparse
+from datetime import datetime
 
 from carlib.location import gps as location
 from carlib.core.output import (
@@ -96,6 +97,55 @@ async def cmd_enable(args) -> None:
     if args.assisted:
         print('A-GPS needs a working data connection to help.',
               file=sys.stderr)
+
+
+async def cmd_ensure(args) -> None:
+    """Enable GPS only if it is off. Safe to run repeatedly."""
+    result = await location.ensure_enabled(
+        args.target,
+        nmea=not args.no_nmea,
+        raw=not args.no_raw,
+        assisted=args.assisted,
+        refresh_rate=args.rate,
+    )
+    if args.json:
+        emit_json(result)
+        return
+
+    print(result.reason)
+    if result.modem:
+        print(f'  {result.modem.model or result.modem.path}')
+        print(f'  sources: '
+              f'{", ".join(result.modem.location_enabled) or "none"}')
+    if result.rate_changed:
+        print(f'  refresh rate set to {args.rate}s')
+
+
+async def cmd_supervise(args) -> None:
+    """
+    Keep GPS enabled for as long as this runs.
+
+    Location gathering resets when ModemManager restarts or the modem
+    re-enumerates, so a one-shot enable at boot is not enough.
+    """
+    print(f'supervising (every {args.interval}s, ctrl-c to stop)',
+          file=sys.stderr)
+
+    async for event in location.supervise(
+            interval=args.interval,
+            match=args.target,
+            nmea=not args.no_nmea,
+            raw=not args.no_raw,
+            assisted=args.assisted,
+            refresh_rate=args.rate):
+
+        if args.json:
+            emit_json(event)
+            continue
+
+        stamp = datetime.now().strftime('%H:%M:%S')
+        mark = '*' if event.changed else ' '
+        print(f'{stamp} {mark} {event.reason}', flush=True)
 
 
 async def cmd_disable(args) -> None:
@@ -202,6 +252,28 @@ def main() -> int:
     add_target(p, required=False)
     p.add_argument('--assisted', action='store_true',
                    help='enable A-GPS for a faster first fix')
+    p.add_argument('--no-nmea', action='store_true')
+    p.add_argument('--no-raw', action='store_true')
+
+    p = sub.add_parser('ensure', parents=[common],
+                       help='enable only if off; safe to repeat')
+    p.set_defaults(fn=cmd_ensure)
+    add_target(p, required=False)
+    p.add_argument('--rate', type=int, default=1,
+                   help='refresh rate in seconds (default 1)')
+    p.add_argument('--assisted', action='store_true')
+    p.add_argument('--no-nmea', action='store_true')
+    p.add_argument('--no-raw', action='store_true')
+
+    p = sub.add_parser('supervise', parents=[common],
+                       help='keep GPS enabled; for a systemd service')
+    p.set_defaults(fn=cmd_supervise)
+    add_target(p, required=False)
+    p.add_argument('--interval', type=float, default=10.0,
+                   help='seconds between checks (default 10)')
+    p.add_argument('--rate', type=int, default=1,
+                   help='refresh rate in seconds (default 1)')
+    p.add_argument('--assisted', action='store_true')
     p.add_argument('--no-nmea', action='store_true')
     p.add_argument('--no-raw', action='store_true')
 
