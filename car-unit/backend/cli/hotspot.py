@@ -37,16 +37,22 @@ def show(state) -> None:
             print(f'  ssid:  {state.ssid} (configured)')
         return
 
-    print(f'{state.ssid or "hotspot"}  on')
-    print(f'  channel:  {state.channel or "-"}  {state.band}')
+    label = 'on' if state.on_air else f'{state.hostapd_state or "?"}'
+    print(f'{state.ssid or "hotspot"}  {label}')
+    print(f'  channel:  {state.channel or "-"}'
+          f'{"  " + state.band if state.band else ""}'
+          f'{"  " + state.frequency + " MHz" if state.frequency else ""}')
+    if state.bssid:
+        print(f'  bssid:    {state.bssid}')
     print(f'  address:  {state.address or "-"}')
     print(f'  uplink:   {state.uplink or "none"}')
     print(f'  clients:  {state.client_count}'
           f'{"" if state.clients_verified else "  (unverified)"}')
 
     for client in state.clients:
+        extra = f'  {client.signal} dBm' if client.signal is not None else ''
         print(f'      {client.ip or "(no lease)":<15} {client.mac}  '
-              f'{client.hostname}')
+              f'{client.hostname}{extra}')
 
     if state.stale_leases:
         print(f'  stale leases: {len(state.stale_leases)}'
@@ -61,6 +67,11 @@ def show(state) -> None:
         if unhealthy:
             print(f'\n  not running: {", ".join(unhealthy)}',
                   file=sys.stderr)
+
+    if state.active and not state.on_air:
+        print(f'\nhostapd is running but the interface is '
+              f'{state.hostapd_state} -- not broadcasting.\n'
+              f'Check `rfkill list` for a soft block.', file=sys.stderr)
 
     if not state.uplink:
         print('\nNo default route -- clients will associate but have no '
@@ -113,8 +124,11 @@ async def cmd_clients(args) -> None:
 
     width = max(len(c.hostname or '?') for c in state.clients)
     for c in state.clients:
+        signal = f'{c.signal:>4} dBm' if c.signal is not None else ''
+        seen = (f'  {c.connected_time}s'
+                if c.connected_time is not None else '')
         print(f'{(c.ip or "(no lease)"):<15}  {c.mac}  '
-              f'{(c.hostname or "?"):<{width}}')
+              f'{(c.hostname or "?"):<{width}}  {signal}{seen}')
 
 
 async def cmd_waybar(args) -> None:
@@ -126,20 +140,24 @@ async def cmd_waybar(args) -> None:
                           'class': 'off', 'tooltip': 'unavailable'}))
         return
 
-    if not state.active:
+    if not state.on_air:
+        tooltip = 'hotspot off'
+        if state.active:
+            tooltip = f'hostapd running but {state.hostapd_state}'
         print(json.dumps({
             'text': GLYPH_OFF,
             'alt': 'off',
             'class': 'off',
-            'tooltip': 'hotspot off',
+            'tooltip': tooltip,
         }, ensure_ascii=False))
         return
 
     count = state.client_count
-    text = f'{GLYPH_ON} {count}' if count else GLYPH_ON
+    text = f'{GLYPH_ON}  {count}' if count else GLYPH_ON
 
     names = '\n'.join(f'  {c.ip}  {c.label}' for c in state.clients)
-    tooltip = (f'{state.ssid or "hotspot"}\n'
+    tooltip = (f'{state.ssid or "hotspot"}'
+               f'{"  ch " + state.channel if state.channel else ""}\n'
                f'uplink: {state.uplink or "none"}\n'
                f'{count} client{"" if count == 1 else "s"}'
                + (f'\n{names}' if names else ''))

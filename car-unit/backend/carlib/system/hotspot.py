@@ -5,6 +5,21 @@ The hotspot is hostapd, with dnsmasq (DHCP) and iptables (NAT) pulled
 in by systemd -- hostapd Wants them, they BindsTo it, so starting and
 stopping hostapd handles all three.
 
+State comes from hostapd's control socket via hostapd_cli, which
+reports what is actually running rather than what is configured. That
+matters twice over: hostapd.conf is usually mode 600 because it holds
+the passphrase, so parsing it as a normal user yields nothing; and with
+automatic channel selection the configured channel is not the one in
+use. The socket needs this in hostapd.conf:
+
+    ctrl_interface=/run/hostapd
+    ctrl_interface_group=wheel
+
+The group line is what lets your user read it without sudo.
+
+DHCP leases still come from dnsmasq's lease file -- hostapd knows who
+is associated, but not what address they were given.
+
 The Pi 4 has one radio, so an access point and a WiFi client cannot run
 at once. Starting the hotspot therefore releases wlan0 from
 NetworkManager with `nmcli device set wlan0 managed no`.
@@ -13,10 +28,6 @@ Do NOT use `nmcli radio wifi off` for that. It sets an rfkill soft
 block on the whole phy, which blocks hostapd too -- and NetworkManager
 persists the state, so the block comes back after every reboot.
 `managed no` releases the interface without touching rfkill.
-
-Client leases are read from dnsmasq's lease file rather than over
-D-Bus: dnsmasq's D-Bus interface does not expose them, and the file
-format is stable.
 """
 
 import re
@@ -34,13 +45,18 @@ from carlib.system import services
 UNIT = 'hostapd.service'
 INTERFACE = 'wlan0'
 
+HOSTAPD_CLI = 'hostapd_cli'
 HOSTAPD_CONF = Path('/etc/hostapd/hostapd.conf')
+
 LEASE_FILES = (
     Path('/var/lib/misc/dnsmasq.leases'),
     Path('/var/lib/dnsmasq/dnsmasq.leases'),
 )
 
 NMCLI = 'nmcli'
+
+# hostapd's own state machine. Only ENABLED means the AP is on the air.
+STATE_ENABLED = 'ENABLED'
 
 
 @dataclass
@@ -49,6 +65,8 @@ class Client:
     ip: str = ''
     hostname: str = ''
     expires: int = 0
+    signal: int | None = None
+    connected_time: int | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -62,8 +80,11 @@ class Client:
 class HotspotState:
     active: bool = False
     ssid: str = ''
+    bssid: str = ''
     channel: str = ''
+    frequency: str = ''
     band: str = ''
+    hostapd_state: str = ''
     interface: str = INTERFACE
     address: str = ''
     uplink: str = ''
@@ -80,9 +101,20 @@ class HotspotState:
         return len(self.clients)
 
     @property
+    def on_air(self) -> bool:
+        """
+        Running AND broadcasting.
+
+        hostapd can be active as a unit while its interface sits in
+        DISABLED -- typically an rfkill block or a channel it cannot
+        use. That is a different failure from the service being down.
+        """
+        return self.active and self.hostapd_state == STATE_ENABLED
+
+    @property
     def healthy(self) -> bool:
-        """Running with DHCP and NAT actually up behind it."""
-        if not self.active:
+        """On the air with DHCP and NAT actually up behind it."""
+        if not self.on_air:
             return False
         return all(v == 'active' for v in self.followers.values())
 
@@ -111,8 +143,107 @@ async def _run(*args: str, timeout: float = 20.0) -> str:
     return out.decode(errors='replace')
 
 
+# --- hostapd control socket ------------------------------------------------
+
+def parse_kv(text: str) -> dict:
+    """
+    hostapd_cli emits flat key=value lines.
+
+    Keys are indexed per-BSS (ssid[0], bssid[0]) since hostapd can run
+    several on one radio; we only ever have one.
+    """
+    result = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or '=' not in line:
+            continue
+        key, _, value = line.partition('=')
+        result[key.strip()] = value.strip()
+    return result
+
+
+def parse_stations(text: str) -> list[Client]:
+    """
+    Parse `hostapd_cli all_sta`.
+
+    Each station starts with a bare MAC on its own line, followed by
+    key=value lines until the next MAC.
+    """
+    clients = []
+    current = None
+
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+
+        if re.fullmatch(r'[0-9a-f:]{17}', line, re.IGNORECASE):
+            current = Client(mac=line.lower())
+            clients.append(current)
+            continue
+
+        if current is None or '=' not in line:
+            continue
+
+        key, _, value = line.partition('=')
+        key = key.strip()
+        value = value.strip()
+
+        if key == 'signal':
+            try:
+                current.signal = int(value)
+            except ValueError:
+                pass
+        elif key == 'connected_time':
+            try:
+                current.connected_time = int(value)
+            except ValueError:
+                pass
+
+    return clients
+
+
+async def _cli(*args: str) -> str:
+    """Run hostapd_cli against our interface."""
+    return await _run(HOSTAPD_CLI, '-i', INTERFACE, *args, timeout=5.0)
+
+
+async def hostapd_status() -> dict | None:
+    """
+    Live state from hostapd's control socket.
+
+    Returns None when the socket is unreachable -- hostapd not running,
+    or ctrl_interface not configured. That is different from hostapd
+    running with a disabled interface, which returns a dict with
+    state=DISABLED.
+    """
+    try:
+        return parse_kv(await _cli('status'))
+    except NotAvailableError:
+        return None
+
+
+async def hostapd_stations() -> list[Client] | None:
+    """
+    Associated stations, with signal strength.
+
+    Returns None when the socket is unreachable, so callers can tell
+    'nobody connected' from 'could not ask'.
+    """
+    try:
+        return parse_stations(await _cli('all_sta'))
+    except NotAvailableError:
+        return None
+
+
 def read_config() -> dict:
-    """Parse the handful of hostapd.conf keys worth reporting."""
+    """
+    Fall back to hostapd.conf when the control socket is unavailable.
+
+    Usually returns nothing: the file holds the passphrase and so is
+    typically mode 600. Add ctrl_interface to hostapd.conf rather than
+    relying on this.
+    """
     result = {}
     if not HOSTAPD_CONF.exists():
         return result
@@ -120,7 +251,6 @@ def read_config() -> dict:
     try:
         text = HOSTAPD_CONF.read_text(errors='replace')
     except PermissionError:
-        # hostapd.conf holds the passphrase, so it is often 0600.
         return result
 
     for line in text.splitlines():
@@ -133,6 +263,8 @@ def read_config() -> dict:
 
     return result
 
+
+# --- DHCP leases -----------------------------------------------------------
 
 def parse_leases(text: str) -> list[Client]:
     """
@@ -154,7 +286,7 @@ def parse_leases(text: str) -> list[Client]:
 
         hostname = parts[3]
         clients.append(Client(
-            mac=parts[1],
+            mac=parts[1].lower(),
             ip=parts[2],
             hostname='' if hostname == '*' else hostname,
             expires=expires,
@@ -183,21 +315,7 @@ def read_leases(subnet_prefix: str = '192.168.50.') -> list[Client]:
     return []
 
 
-async def associated_macs() -> list[str] | None:
-    """
-    MACs currently associated at the radio level.
-
-    Returns None when the check itself could not run -- an empty list
-    genuinely means nobody is connected, and conflating the two makes
-    stale leases look like live clients.
-    """
-    try:
-        out = await _run('iw', 'dev', INTERFACE, 'station', 'dump')
-    except NotAvailableError:
-        return None
-
-    return re.findall(r'Station ([0-9a-f:]{17})', out, re.IGNORECASE)
-
+# --- Interface and routing -------------------------------------------------
 
 async def _interface_address() -> str:
     try:
@@ -218,6 +336,24 @@ async def _uplink() -> str:
     return match.group(1) if match else ''
 
 
+def band_from_freq(freq: str) -> str:
+    try:
+        mhz = int(freq)
+    except (ValueError, TypeError):
+        return ''
+    if 2400 <= mhz < 2500:
+        return '2.4 GHz'
+    # 6E starts at 5925 MHz, so the 5 GHz band stops below it rather
+    # than at a round 6000.
+    if 5000 <= mhz < 5925:
+        return '5 GHz'
+    if mhz >= 5925:
+        return '6 GHz'
+    return ''
+
+
+# --- Status ----------------------------------------------------------------
+
 async def status() -> HotspotState:
     """Everything worth knowing about the hotspot in one call."""
     svc = await services.status('hotspot')
@@ -227,54 +363,70 @@ async def status() -> HotspotState:
         followers=svc.followers or {},
     )
 
-    config = read_config()
-    state.ssid = config.get('ssid', '')
-    state.channel = config.get('channel', '')
-    mode = config.get('hw_mode', '')
-    state.band = {'g': '2.4 GHz', 'b': '2.4 GHz',
-                  'a': '5 GHz'}.get(mode, mode)
-
     if not state.active:
+        # Nothing live to read, so fall back to the configured SSID if
+        # the file happens to be readable.
+        config = read_config()
+        state.ssid = config.get('ssid', '')
+        state.channel = config.get('channel', '')
         return state
+
+    hostapd = await hostapd_status()
+
+    if hostapd is not None:
+        state.hostapd_state = hostapd.get('state', '')
+        state.ssid = hostapd.get('ssid[0]', '')
+        state.bssid = hostapd.get('bssid[0]', '')
+        state.channel = hostapd.get('channel', '')
+        state.frequency = hostapd.get('freq', '')
+        state.band = band_from_freq(state.frequency)
+    else:
+        # Socket unreachable. Report what the config says and assume
+        # the interface is up, since the unit is active.
+        config = read_config()
+        state.ssid = config.get('ssid', '')
+        state.channel = config.get('channel', '')
+        state.band = {'g': '2.4 GHz', 'b': '2.4 GHz',
+                      'a': '5 GHz'}.get(config.get('hw_mode', ''), '')
+        state.hostapd_state = STATE_ENABLED
 
     state.address = await _interface_address()
     state.uplink = await _uplink()
 
-    # A lease outlives the connection -- dnsmasq keeps it for the full
-    # lease time whether or not the device is still on the air. So the
-    # station dump decides who counts as connected; the lease only
-    # supplies the address and hostname.
+    # hostapd is authoritative for who is associated; the lease file
+    # only supplies the address and hostname. A lease outlives the
+    # connection, so leases alone would report ghosts.
+    stations = await hostapd_stations()
     leases = read_leases()
-    associated = await associated_macs()
+    by_mac = {c.mac: c for c in leases}
 
-    if associated is None:
-        # The check could not run (no iw, wrong interface). Report the
-        # leases but flag that they are unverified rather than silently
-        # implying they are live.
+    if stations is None:
         state.clients = leases
         state.clients_verified = False
         return state
 
-    by_mac = {c.mac.lower(): c for c in leases}
     state.clients_verified = True
     state.clients = []
 
-    for mac in associated:
-        mac = mac.lower()
-        # An associated device with no lease yet still counts -- it is
-        # on the air, just mid-DHCP.
-        state.clients.append(by_mac.get(mac, Client(mac=mac)))
+    for station in stations:
+        lease = by_mac.get(station.mac)
+        if lease is not None:
+            station.ip = lease.ip
+            station.hostname = lease.hostname
+            station.expires = lease.expires
+        # An associated station with no lease is still connected --
+        # it is on the air, just mid-DHCP.
+        state.clients.append(station)
 
     state.clients.sort(key=lambda c: c.ip or c.mac)
 
-    # Leases with no matching station: expired connections, useful to
-    # show separately rather than as connected clients.
-    state.stale_leases = [c for c in leases
-                          if c.mac.lower() not in
-                          {m.lower() for m in associated}]
+    associated = {s.mac for s in stations}
+    state.stale_leases = [c for c in leases if c.mac not in associated]
 
     return state
 
+
+# --- Control ---------------------------------------------------------------
 
 async def _wait_for(active: bool, timeout: float = 10.0) -> bool:
     """
@@ -346,3 +498,8 @@ async def restart() -> HotspotState:
     await stop(restore_wifi=False)
     await asyncio.sleep(1.0)
     return await start()
+
+
+async def deauth(mac: str) -> None:
+    """Kick a client off. It is free to reconnect immediately."""
+    await _cli('deauthenticate', mac)
