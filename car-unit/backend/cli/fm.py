@@ -31,8 +31,13 @@ import argparse
 from carlib.radio import fm
 from carlib.core.output import run, emit_json, global_flags, parse_args
 
-GLYPH_ON = '\U000f043d'         # nf-md-radio
-GLYPH_OFF = '\U000f043e'        # nf-md-radio_off
+# Nerd Font glyph. Empty box means the font is missing:
+# pacman -S ttf-nerd-fonts-symbols
+GLYPH = '\uefbc'               # nf-md-radio_tower
+
+# How much RadioText to show inline. The full 64 characters would
+# dominate a status bar, and it scrolls at the station's pace anyway.
+TEXT_LIMIT = 40
 
 STEP = 0.1
 
@@ -188,13 +193,14 @@ async def cmd_waybar(args) -> None:
     try:
         state = await fm.status()
     except Exception:
-        print(json.dumps({'text': GLYPH_OFF, 'alt': 'off',
-                          'class': 'off', 'tooltip': 'unavailable'}))
+        print(json.dumps({'text': GLYPH, 'alt': 'off',
+                          'class': 'off', 'tooltip': 'unavailable'},
+                         ensure_ascii=False))
         return
 
     if not state.playing:
         print(json.dumps({
-            'text': GLYPH_OFF,
+            'text': GLYPH,
             'alt': 'off',
             'class': 'off',
             'tooltip': 'radio off',
@@ -202,24 +208,32 @@ async def cmd_waybar(args) -> None:
         return
 
     rds = state.rds
-    name = rds.ps or state.name
-    text = f'{GLYPH_ON}  {name}' if name else \
-        f'{GLYPH_ON}  {state.frequency:.1f}'
+    name = rds.ps or state.name or f'{state.frequency:.1f}'
+
+    parts = [GLYPH, name]
+    if rds.radiotext:
+        text = rds.radiotext
+        if len(text) > TEXT_LIMIT:
+            text = text[:TEXT_LIMIT - 1].rstrip() + '\u2026'
+        parts.append(text)
 
     lines = [f'{state.frequency:.1f} MHz'
-             + (f' · {name}' if name else '')]
+             + (f' \u00b7 {rds.ps}' if rds.ps else '')]
     if rds.radiotext:
         lines.append(rds.radiotext)
     if rds.program_type:
         lines.append(rds.program_type)
     if rds.traffic_announcement:
         lines.append('traffic announcement')
-    lines.append(f'gain {state.gain:g} dB · {state.uptime}s')
+    if rds.alt_frequencies:
+        lines.append('also on ' + ' '.join(f'{f:.1f}'
+                                           for f in rds.alt_frequencies))
+    lines.append(f'gain {state.gain:g} dB \u00b7 {state.uptime}s')
 
     print(json.dumps({
-        'text': text,
-        'alt': 'traffic' if rds.traffic_announcement else 'on',
-        'class': 'traffic' if rds.traffic_announcement else 'on',
+        'text': '  '.join(parts),
+        'alt': 'on',
+        'class': 'on',
         'tooltip': '\n'.join(lines),
     }, ensure_ascii=False))
 
