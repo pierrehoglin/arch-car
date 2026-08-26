@@ -538,15 +538,24 @@ def player_command() -> str:
     """
     The command that puts audio on the graph.
 
-    pw-play when available: it is PipeWire-native and --media-name
-    sets a property we can find the stream by. Falling back to sox's
-    `play` costs us a reliable tag, since sox built against ALSA
-    ignores PULSE_PROP -- the stream then appears as a generic "SoX",
-    which the matcher can still find but would confuse with any other
-    sox process.
+    pw-play when available: being PipeWire-native, its -P option sets
+    node properties directly, so the stream can be found reliably.
+    Falling back to sox's `play` costs us that, since sox built
+    against ALSA ignores PULSE_PROP -- the stream then appears as a
+    generic "SoX", which the matcher can still find but would confuse
+    with any other sox process.
+
+    Set the `fm.player` setting to "sox" to force the fallback.
     """
-    if shutil.which(PW_PLAY):
-        return (f'{PW_PLAY} --media-name={STREAM_TAG} '
+    choice = _settings.get_str('player', 'auto')
+
+    if choice != 'sox' and shutil.which(PW_PLAY):
+        # -P sets node properties directly. There is no --media-name;
+        # node.name is what pw-dump reports and what the matcher looks
+        # for.
+        props = (f'{{ node.name = "{STREAM_TAG}" '
+                 f'application.name = "{STREAM_TAG}" }}')
+        return (f"{PW_PLAY} -P '{props}' "
                 f'--rate {AUDIO_RATE} --channels 1 --format s16 '
                 f'--raw -')
 
