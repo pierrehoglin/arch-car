@@ -28,6 +28,7 @@ import asyncio
 from pathlib import Path
 from dataclasses import dataclass, field, asdict
 
+from carlib.core import settings
 from carlib.core.errors import NotAvailableError, NotFoundError
 
 RTL_FM = 'rtl_fm'
@@ -93,16 +94,11 @@ def _runtime_dir() -> Path:
 STATE_FILE = _runtime_dir() / 'carlib-fm.json'
 RDS_FILE = _runtime_dir() / 'carlib-fm-rds.jsonl'
 SCAN_FILE = _runtime_dir() / 'carlib-fm-scan.json'
-_CONFIG_DIR = (
-    Path(os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config'))
-    / 'carlib'
-)
-PRESET_FILE = _CONFIG_DIR / 'fm-presets.json'
-
-# Last station played. In the config directory rather than the runtime
-# one so it survives a reboot -- the point is that the car radio comes
-# back on the station you left it on.
-LAST_FILE = _CONFIG_DIR / 'fm-last.json'
+# Presets, the last station and the default gain live in the shared
+# settings file rather than files of their own -- one place for user
+# configuration, and the atomic writes there matter for anything a car
+# unit saves while the ignition might be switched off.
+_settings = settings.section('fm')
 
 
 @dataclass
@@ -332,15 +328,10 @@ def parse_frequency(value: str | float | int) -> float:
 # --- Presets ---------------------------------------------------------------
 
 def load_presets() -> list[Station]:
-    if not PRESET_FILE.exists():
-        return []
-    try:
-        raw = json.loads(PRESET_FILE.read_text())
-    except (OSError, json.JSONDecodeError):
-        return []
-
     stations = []
-    for entry in raw:
+    for entry in _settings.get_list('presets', []):
+        if not isinstance(entry, dict):
+            continue
         try:
             stations.append(Station(
                 frequency=float(entry['frequency']),
@@ -354,9 +345,7 @@ def load_presets() -> list[Station]:
 
 
 def save_presets(stations: list[Station]) -> None:
-    PRESET_FILE.parent.mkdir(parents=True, exist_ok=True)
-    PRESET_FILE.write_text(json.dumps(
-        [s.to_dict() for s in stations], indent=2, ensure_ascii=False))
+    _settings.set('presets', [s.to_dict() for s in stations])
 
 
 def add_preset(frequency: float, name: str = '') -> list[Station]:
@@ -412,37 +401,28 @@ def resolve_station(value: str) -> Station:
 
 def save_last(frequency: float, name: str = '',
               gain: float = DEFAULT_GAIN) -> None:
-    try:
-        _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        LAST_FILE.write_text(json.dumps({
-            'frequency': frequency,
-            'name': name,
-            'gain': gain,
-        }))
-    except OSError:
-        pass
+    _settings.set('last', {
+        'frequency': frequency,
+        'name': name,
+        'gain': gain,
+    })
 
 
 def load_last() -> Station | None:
     """The station playing when the radio was last stopped."""
-    if not LAST_FILE.exists():
-        return None
+    data = _settings.get_dict('last', {})
     try:
-        data = json.loads(LAST_FILE.read_text())
         return Station(frequency=float(data['frequency']),
                        name=data.get('name', ''))
-    except (OSError, json.JSONDecodeError, KeyError, TypeError,
-            ValueError):
+    except (KeyError, TypeError, ValueError):
         return None
 
 
 def last_gain() -> float:
-    if not LAST_FILE.exists():
-        return DEFAULT_GAIN
+    data = _settings.get_dict('last', {})
     try:
-        return float(json.loads(LAST_FILE.read_text()).get(
-            'gain', DEFAULT_GAIN))
-    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return float(data.get('gain', DEFAULT_GAIN))
+    except (TypeError, ValueError):
         return DEFAULT_GAIN
 
 
@@ -656,6 +636,22 @@ async def stop() -> RadioState:
     return RadioState(playing=False)
 
 
+def default_gain() -> float:
+    """
+    Tuner gain, from settings if the user has set one.
+
+    The right value depends on the antenna -- 40 dB suits a bare wire,
+    a proper car antenna usually wants less. Worth being a setting
+    rather than a constant.
+    """
+    return _settings.get_float('gain', DEFAULT_GAIN)
+
+
+def default_rds() -> bool:
+    """Whether to decode RDS by default. Off costs less CPU."""
+    return _settings.get_bool('rds', True)
+
+
 async def play(station: Station | float | str | None = None,
                gain: float | None = None,
                device: int = 0,
@@ -696,7 +692,7 @@ async def play(station: Station | float | str | None = None,
         target = resolve_station(station)
 
     if gain is None:
-        gain = DEFAULT_GAIN
+        gain = default_gain()
 
     previous = _read_state().get('pid')
     await stop()

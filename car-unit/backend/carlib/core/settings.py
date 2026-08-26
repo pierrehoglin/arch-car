@@ -357,6 +357,9 @@ class Section:
     def get_list(self, key: str, default: list | None = None) -> list:
         return get_list(self._key(key), default)
 
+    def get_dict(self, key: str, default: dict | None = None) -> dict:
+        return get_dict(self._key(key), default)
+
 
 def section(prefix: str) -> Section:
     return Section(prefix)

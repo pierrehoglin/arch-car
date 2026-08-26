@@ -26,6 +26,9 @@ Needs rtl-sdr and sox:
 
 Playback runs in the background and survives this command exiting, so
 `fm play` then `fm stop` from a later invocation works.
+
+Presets, the last station and the default gain live in the shared
+settings file -- see `settings show`.
 """
 
 import sys
@@ -322,8 +325,8 @@ def main() -> int:
                    help='frequency or preset name; omit to resume the '
                         'last station played')
     p.add_argument('--gain', type=float, default=None,
-                   help='tuner gain in dB; defaults to whatever was '
-                        'last used')
+                   help='tuner gain in dB; defaults to the last used, '
+                        'then the fm.gain setting')
     p.add_argument('--device', type=int, default=0)
     p.add_argument('--squelch', type=int, default=0,
                    help='silence below this level; 0 disables')
