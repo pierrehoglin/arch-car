@@ -50,7 +50,12 @@ def show(state) -> None:
           f'{"" if state.clients_verified else "  (unverified)"}')
 
     for client in state.clients:
-        extra = f'  {client.signal} dBm' if client.signal is not None else ''
+        bits = []
+        if client.signal is not None:
+            bits.append(f'{client.signal} dBm')
+        if client.tx_rate:
+            bits.append(f'{client.tx_rate:.0f} Mbps')
+        extra = ('  ' + '  '.join(bits)) if bits else ''
         print(f'      {client.ip or "(no lease)":<15} {client.mac}  '
               f'{client.hostname}{extra}')
 
@@ -124,11 +129,15 @@ async def cmd_clients(args) -> None:
 
     width = max(len(c.hostname or '?') for c in state.clients)
     for c in state.clients:
-        signal = f'{c.signal:>4} dBm' if c.signal is not None else ''
-        seen = (f'  {c.connected_time}s'
-                if c.connected_time is not None else '')
+        bits = []
+        if c.signal is not None:
+            bits.append(f'{c.signal:>4} dBm')
+        if c.tx_rate:
+            bits.append(f'{c.tx_rate:>6.1f} Mbps')
+        if c.connected_time is not None:
+            bits.append(f'{c.connected_time}s')
         print(f'{(c.ip or "(no lease)"):<15}  {c.mac}  '
-              f'{(c.hostname or "?"):<{width}}  {signal}{seen}')
+              f'{(c.hostname or "?"):<{width}}  ' + '  '.join(bits))
 
 
 async def cmd_waybar(args) -> None:

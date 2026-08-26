@@ -67,6 +67,10 @@ class Client:
     expires: int = 0
     signal: int | None = None
     connected_time: int | None = None
+    tx_rate: float | None = None        # Mbps, negotiated
+    rx_rate: float | None = None
+    rx_bytes: int = 0
+    tx_bytes: int = 0
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -191,7 +195,32 @@ def parse_stations(text: str) -> list[Client]:
 
         if key == 'signal':
             try:
-                current.signal = int(value)
+                value_int = int(value)
+            except ValueError:
+                continue
+            # brcmfmac does not populate signal and reports 0 rather
+            # than omitting the field. A genuine 0 dBm would be an
+            # absurdly strong signal, so treat it as unknown.
+            current.signal = value_int if value_int != 0 else None
+        elif key == 'tx_rate_info':
+            # Units are 100 kbps, so 4333 is 433.3 Mbps.
+            try:
+                current.tx_rate = int(value) / 10.0
+            except ValueError:
+                pass
+        elif key == 'rx_rate_info':
+            try:
+                current.rx_rate = int(value) / 10.0
+            except ValueError:
+                pass
+        elif key == 'rx_bytes':
+            try:
+                current.rx_bytes = int(value)
+            except ValueError:
+                pass
+        elif key == 'tx_bytes':
+            try:
+                current.tx_bytes = int(value)
             except ValueError:
                 pass
         elif key == 'connected_time':
