@@ -10,13 +10,12 @@ What is stable is the id for the lifetime of a stream. So the pattern
 is resolve once when the stream starts, cache it, and re-resolve only
 when an operation fails -- which is what a stale id looks like.
 
-Streams are found by their PipeWire properties rather than by name.
-Tag a stream at launch and it can be found again:
+Streams are found by their PipeWire properties. Tag a stream at
+launch and it can be found again:
 
-    PULSE_PROP='application.name=carlib-fm' play ...
+    pw-play -P '{ node.name = "carlib-fm" }' ...
 
-Requires pipewire-pulse and wireplumber, both already needed for
-audio.
+Requires pipewire and wireplumber, both already needed for audio.
 """
 
 import json
@@ -134,36 +133,24 @@ def match(candidates: list[Node], *,
           name: str = '',
           binary: str = '') -> Node | None:
     """
-    Find a node by property, most specific match first.
+    Find a node by property, exact and case-insensitive.
 
-    Every supplied term is tried against every field, because what
-    lands on the graph depends on which backend the player used.
-    PULSE_PROP only reaches PipeWire through the Pulse compatibility
-    layer -- sox built against ALSA ignores it entirely and shows up
-    as "SoX" instead.
+    Every supplied term is tried against every field, because which
+    property carries the tag depends on how the stream was created.
 
-    Matching is case-insensitive: sox reports "SoX", not "sox".
+    Deliberately exact: with pw-play setting node.name explicitly
+    there is nothing to be lenient about, and a substring match could
+    grab the wrong stream.
     """
     terms = [t for t in (application, name, binary) if t]
     if not terms:
         return None
 
-    def fields(node: Node) -> list[str]:
-        return [node.application, node.name, node.binary]
-
-    # Exact, case-insensitive, across all fields.
     for term in terms:
         lowered = term.lower()
         for node in candidates:
-            if any(f and f.lower() == lowered for f in fields(node)):
-                return node
-
-    # Substring, for players that decorate the name.
-    for term in terms:
-        lowered = term.lower()
-        for node in candidates:
-            haystack = ' '.join(f for f in fields(node) if f).lower()
-            if lowered in haystack:
+            fields = (node.application, node.name, node.binary)
+            if any(f and f.lower() == lowered for f in fields):
                 return node
 
     return None

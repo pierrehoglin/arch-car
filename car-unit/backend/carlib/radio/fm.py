@@ -38,7 +38,6 @@ RTL_TEST = 'rtl_test'
 RTL_POWER = 'rtl_power'
 REDSEA = 'redsea'
 SOX = 'sox'
-PLAY = 'play'
 PW_PLAY = 'pw-play'
 
 # Tag the playback stream so it can be found on the PipeWire graph and
@@ -538,29 +537,21 @@ def player_command() -> str:
     """
     The command that puts audio on the graph.
 
-    pw-play when available: being PipeWire-native, its -P option sets
-    node properties directly, so the stream can be found reliably.
-    Falling back to sox's `play` costs us that, since sox built
-    against ALSA ignores PULSE_PROP -- the stream then appears as a
-    generic "SoX", which the matcher can still find but would confuse
-    with any other sox process.
-
-    Set the `fm.player` setting to "sox" to force the fallback.
+    pw-play rather than sox's `play` because -P sets node properties
+    directly, which is the only reliable way to find the stream again
+    and mute it. sox typically links against ALSA, in which case
+    PULSE_PROP never reaches PipeWire and the stream appears as a
+    generic "SoX" -- indistinguishable from any other sox process.
     """
-    choice = _settings.get_str('player', 'auto')
+    if not shutil.which(PW_PLAY):
+        raise NotAvailableError(
+            'pw-play not found',
+            hint='pacman -S pipewire')
 
-    if choice != 'sox' and shutil.which(PW_PLAY):
-        # -P sets node properties directly. There is no --media-name;
-        # node.name is what pw-dump reports and what the matcher looks
-        # for.
-        props = (f'{{ node.name = "{STREAM_TAG}" '
-                 f'application.name = "{STREAM_TAG}" }}')
-        return (f"{PW_PLAY} -P '{props}' "
-                f'--rate {AUDIO_RATE} --channels 1 --format s16 '
-                f'--raw -')
-
-    return (f"PULSE_PROP='application.name={STREAM_TAG}' "
-            f'{PLAY} -q -r {AUDIO_RATE} -t raw -e s -b 16 -c 1 -')
+    props = (f'{{ node.name = "{STREAM_TAG}" '
+             f'application.name = "{STREAM_TAG}" }}')
+    return (f"{PW_PLAY} -P '{props}' "
+            f'--rate {AUDIO_RATE} --channels 1 --format s16 --raw -')
 
 
 def build_command(frequency: float, gain: float = DEFAULT_GAIN,
@@ -1253,8 +1244,7 @@ async def _resolve_node(force: bool = False) -> int:
             return int(cached)      # PipeWire unreachable; try anyway
 
     node = await pipewire.find(application=STREAM_TAG,
-                               name=STREAM_TAG,
-                               binary='sox')
+                               name=STREAM_TAG)
     data['node_id'] = node.id
     _write_state(data)
     return node.id
@@ -1283,9 +1273,8 @@ async def set_muted(muted: bool) -> RadioState:
         except (NotAvailableError, NotFoundError) as exc:
             raise NotAvailableError(
                 f'cannot mute the radio stream: {exc}',
-                hint='check `pw-dump | grep carlib-fm` finds it; if '
-                     'not, sox may not be passing PULSE_PROP '
-                     'through') from exc
+                hint='check `pw-dump | grep carlib-fm` finds the '
+                     'stream') from exc
 
     data = _read_state()
     data['muted'] = muted
