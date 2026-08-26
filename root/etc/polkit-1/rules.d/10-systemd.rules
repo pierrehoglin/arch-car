@@ -1,0 +1,9 @@
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.systemd1.manage-units" &&
+        subject.user == "alarm") {
+        var unit = action.lookup("unit");
+        if (unit == "hostapd.service") {
+            return polkit.Result.YES;
+        }
+    }
+});

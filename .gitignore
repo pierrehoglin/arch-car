@@ -3,5 +3,8 @@
 *.pkg.*
 
 iso/
-root/
+# root/
 plymouth/
+old_backend/
+
+.git-credentials

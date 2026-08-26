@@ -1,0 +1,3 @@
+for f in ~/Desktop/*.desktop; do
+    gio set --type=string "$f" metadata::trust true
+done

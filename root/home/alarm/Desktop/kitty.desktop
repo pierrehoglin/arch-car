@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Terminal
+Exec=kitty
+Icon=kitty
+Terminal=false
+Categories=System;TerminalEmulator;

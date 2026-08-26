@@ -1,0 +1,15 @@
+[Unit]
+Description=Keep GPS location gathering enabled
+After=ModemManager.service
+Wants=ModemManager.service
+
+[Service]
+Type=simple
+User=alarm
+ExecStart=/home/alarm/arch-car/car-unit/backend/.venv/bin/gps supervise --interval 10 --rate 1
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+

@@ -1,0 +1,27 @@
+initramfs initramfs-linux.img followkernel
+
+# Automatically load overlays for detected cameras
+camera_auto_detect=1
+
+# Automatically load overlays for detected DSI displays
+display_auto_detect=1
+
+# Enable DRM VC4 V3D driver
+dtoverlay=vc4-kms-v3d,nohdmi
+dtoverlay=vc4-kms-dsi-waveshare-panel-v2,10_1_inch_a
+
+max_framebuffers=2
+
+disable_splash=1
+
+# Don't have the firmware create an initial video= setting in cmdline.txt.
+# Use the kernel's default instead.
+disable_fw_kms_setup=1
+
+# Disable compensation for displays with overscan
+disable_overscan=1
+
+# Run as fast as firmware / board allows
+arm_boost=1
+
+[all]

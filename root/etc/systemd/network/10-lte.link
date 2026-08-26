@@ -1,0 +1,5 @@
+[Match]
+Driver=qmi_wwan
+
+[Link]
+Name=lte0

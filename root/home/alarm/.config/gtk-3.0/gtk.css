@@ -1,0 +1,23 @@
+window.background {
+  background-color: #1e1e23;
+  border: 1px solid #3a3a44;
+  border-radius: 10px;
+}
+
+calendar {
+  background-color: transparent;
+  color: #d8d8e0;
+  border: 0;
+  font-size: 16px;
+  padding: 10px;
+}
+
+calendar:selected {
+  background-color: #7fb4e8;
+  color: #1e1e23;
+  border-radius: 6px;
+}
+
+calendar.header {
+  border-bottom: 1px solid #3a3a44;
+}

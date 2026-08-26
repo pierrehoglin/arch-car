@@ -1,0 +1,9 @@
+[Unit]
+Description=Regenerate initramfs on first boot
+ConditionPathExists=!/var/lib/.initramfs-regenerated
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/mkinitcpio -P
+ExecStart=/usr/bin/touch /var/lib/.initramfs-regenerated
+[Install]
+WantedBy=multi-user.target

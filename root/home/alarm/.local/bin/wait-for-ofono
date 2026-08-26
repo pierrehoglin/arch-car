@@ -1,0 +1,15 @@
+#!/bin/sh
+# Block until oFono owns its bus name, or give up after 15s.
+
+# systemctl is-enabled ofono >/dev/null 2>&1 || exit 0
+
+i=0
+while [ $i -lt 30 ]; do
+    if busctl --system status org.ofono >/dev/null 2>&1; then
+        exit 0
+    fi
+    sleep 0.5
+    i=$((i + 1))
+done
+# Don't block the session forever if ofono is absent or broken.
+exit 

@@ -1,0 +1,55 @@
+@define-color foreground #cdd6f4;
+@define-color background #1a1b26;
+
+* {
+  background-color: @background;
+  color: @foreground;
+
+  border: none;
+  border-radius: 0;
+  min-height: 0;
+  font-family: CaskaydiaMono Nerd Font;
+  font-size: 16px;
+}
+
+.modules-left {
+  margin-left: 8px;
+}
+
+.modules-right {
+  margin-right: 8px;
+}
+
+#custom-hotspot.off, 
+#custom-gps.off, 
+#custom-lte.disconnected {
+  color: #5a5a68;
+}
+
+#clock {
+  font-weight: 700;
+}
+
+#tray,
+#cpu,
+#battery,
+#custom-keyboard,
+#custom-hotspot,
+#custom-lte,
+#custom-gps,
+#network,
+#bluetooth,
+#pulseaudio,
+#custom-omarchy {
+  font-size: 24px;
+  margin: 0 8px;
+  padding: 0 8px;
+}
+
+tooltip {
+  padding: 2px;
+}
+
+.custom-spotify {
+  padding: 0 12px;
+}

@@ -1,0 +1,6 @@
+#!/bin/sh
+
+export PATH=$HOME/.local/bin:$PATH
+export CAR_UNIT_PATH=$HOME/arch-car/car-unit
+
+exec wayfire "$@"

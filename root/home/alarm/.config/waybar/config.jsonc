@@ -1,0 +1,147 @@
+{
+    "reload_style_on_change": true,
+    "layer": "top",
+    "position": "top",
+    "spacing": 0,
+    "height": 44,
+    "modules-left": [
+        "custom/keyboard"
+    ],
+    "modules-center": [
+        "clock"
+    ],
+    "modules-right": [
+        "custom/gps",
+        "custom/lte",
+        "custom/hotspot",
+        "network",
+        "bluetooth",
+        "pulseaudio",
+        "cpu",
+        "battery"
+    ],
+    "cpu": {
+        "interval": 5,
+        "format": "󰍛",
+        "on-click": "kitty --start-as=maximized -e btop"
+    },
+    "clock": {
+        "format": "{:L%H:%M | %d %B %Y | vecka %V}",
+        "tooltip": false,
+        "on-click": "gsimplecal"
+    },
+    "custom/gps": {
+        "format": "{}",
+        "exec": "car-unit-scripts gps waybar",
+        "interval": 5,
+        "return-type": "json",
+        "tooltip": false
+    },
+    "custom/lte": {
+        "format": "{}",
+        "return-type": "json",
+        "exec": "car-unit-scripts lte waybar",
+        "interval": 10,
+        "on-click": "lte-notify"
+    },
+    "custom/keyboard": {
+        "format": "",
+        "tooltip": false,
+        "on-click": "wvkbd-toggle"
+    },
+    "custom/hotspot": {
+        "format": "{}",
+        "exec": "car-unit-scripts hotspot waybar",
+        "interval": 10,
+        "on-click": "car-unit-scripts hotspot toggle",
+        "return-type": "json",
+        "tooltip": false
+    },
+    "network": {
+        "format-icons": [
+            "󰤯",
+            "󰤟",
+            "󰤢",
+            "󰤥",
+            "󰤨"
+        ],
+        "format": "{icon}",
+        "format-wifi": "{icon}",
+        "format-ethernet": "󰀂",
+        "format-disconnected": "󰖪",
+        "tooltip-format-wifi": "{essid} ({frequency} GHz)\n⇣{bandwidthDownBytes}  ⇡{bandwidthUpBytes}",
+        "tooltip-format-ethernet": "⇣{bandwidthDownBytes}  ⇡{bandwidthUpBytes}",
+        "tooltip-format-disconnected": "Disconnected",
+        "interval": 3,
+        "nospacing": 1,
+        "on-click": "iwgtk"
+    },
+    "custom/spotify": {
+        "exec": "/usr/bin/python3 /home/alarm/.config/waybar/mediaplayer.py --player spotifyd",
+        "format": "{}",
+        "return-type": "json",
+        "max-length": 40,
+        "on-click": "playerctl play-pause"
+    },
+    "battery": {
+        "format": "{capacity}% {icon}",
+        "format-discharging": "{icon}",
+        "format-charging": "{icon}",
+        "format-plugged": "",
+        "format-icons": {
+            "charging": [
+                "󰢜",
+                "󰂆",
+                "󰂇",
+                "󰂈",
+                "󰢝",
+                "󰂉",
+                "󰢞",
+                "󰂊",
+                "󰂋",
+                "󰂅"
+            ],
+            "default": [
+                "󰁺",
+                "󰁻",
+                "󰁼",
+                "󰁽",
+                "󰁾",
+                "󰁿",
+                "󰂀",
+                "󰂁",
+                "󰂂",
+                "󰁹"
+            ]
+        },
+        "format-full": "󰂅",
+        "tooltip-format-discharging": "{power:>1.0f}W↓ {capacity}%",
+        "tooltip-format-charging": "{power:>1.0f}W↑ {capacity}%",
+        "interval": 5,
+        "states": {
+            "warning": 20,
+            "critical": 10
+        }
+    },
+    "bluetooth": {
+        "format": "",
+        "format-disabled": "󰂲",
+        "format-connected": "",
+        "tooltip-format": "Devices connected: {num_connections}",
+        "on-click": "bluedevil-wizard"
+    },
+    "pulseaudio": {
+        "format": "{icon}",
+        "on-click": "pavucontrol",
+        "tooltip-format": "Playing at {volume}%",
+        "scroll-step": 5,
+        "format-muted": "󰝟",
+        "format-icons": {
+            "default": [
+                "",
+                "",
+                ""
+            ]
+        }
+    }
+}

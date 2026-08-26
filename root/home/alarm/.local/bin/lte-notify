@@ -1,0 +1,4 @@
+#!/bin/sh
+
+body=$(car-unit-scripts lte waybar | python3 -c 'import sys,json; print(json.load(sys.stdin)["tooltip"])')
+notify-send -t 8000 "$body"

@@ -1,0 +1,10 @@
+[terminal]
+vt = 1
+
+[initial_session]
+command = "sh -c 'exec wayfire-run >/tmp/wayfire.log 2>&1'"
+user = "alarm"
+
+[default_session]
+command = "sh -c 'exec wayfire-run >/tmp/wayfire.log 2>&1'"
+user = "alarm"

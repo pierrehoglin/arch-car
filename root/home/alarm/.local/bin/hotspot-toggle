@@ -1,0 +1,12 @@
+#!/bin/sh
+if systemctl is-active --quiet hostapd; then
+    systemctl stop hostapd
+    nmcli device set wlan0 managed yes
+    echo "Start Wifi / Disable Access Point"
+else
+    nmcli device set wlan0 managed no
+    sleep 1
+    systemctl start hostapd
+    echo "Disable Wifi / Start Access Point"
+fi
+pkill -RTMIN+8 -x waybar

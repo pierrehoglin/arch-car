@@ -1,0 +1,6 @@
+#!/bin/sh
+if systemctl is-active --quiet hostapd; then
+    echo '{"text":"󰑩","class":"active"}'
+else
+    echo '{"text":"󱖣","class":"inactive"}'
+fi

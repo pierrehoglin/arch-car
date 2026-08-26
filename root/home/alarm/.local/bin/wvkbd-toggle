@@ -1,0 +1,15 @@
+#!/bin/sh
+
+# STATE="${XDG_RUNTIME_DIR:-/tmp}/wvkbd.visible"
+# if [ -f "$STATE" ]; then
+#     pkill -USR1 -x wvkbd-mobintl && rm -f "$STATE"
+# else
+#     pkill -USR2 -x wvkbd-mobintl && touch "$STATE"
+# fi
+
+PID="$(pidof wvkbd-mobintl)"
+if [  "$PID" != ""  ]; then
+  killall wvkbd-mobintl
+else
+  wvkbd-mobintl -L 280 --fn "JetBrainsMono Nerd Font 16"
+fi

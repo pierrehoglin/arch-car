@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+VENV="$CAR_UNIT_PATH/backend/.venv/bin"
+if [ $# -eq 0 ]; then
+    echo "usage: $(basename "$0") <command> [args...]" >&2
+    echo >&2
+    echo "available:" >&2
+    ls -1 "$VENV" 2>/dev/null | grep -vE '^(python|pip|uv|activate)' \
+        | sed 's/^/  /' >&2
+    exit 1
+fi
+
+CMD="$VENV/$1"
+if [ ! -x "$CMD" ]; then
+    echo "$(basename "$0"): no such command: $1" >&2
+    echo "try: $(basename "$0")   (with no arguments, to list)" >&2
+    exit 127
+fi
+
+exec "$CMD" "${@:2}"

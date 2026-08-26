@@ -1,0 +1,174 @@
+#!/usr/bin/env bash
+#
+# car-unit-sync -- rebuild the backend venv.
+#
+#   car-unit-sync              install/update dependencies (the usual case)
+#   car-unit-sync entry        after adding or renaming a [project.scripts]
+#   car-unit-sync full         wipe .venv and start over
+#   car-unit-sync check        verify without changing anything
+#   car-unit-sync frozen       install exactly what uv.lock pins
+#
+# Editable installs pick up code edits automatically -- you only need
+# this when the packaging changes.
+#
+set -euo pipefail
+
+if [ -z "${CAR_UNIT_PATH:-}" ]; then
+    printf '\033[31m==>\033[0m CAR_UNIT_PATH is not set\n' >&2
+    printf '    set it in ~/.config/environment.d/car-unit.conf:\n' >&2
+    printf '        CAR_UNIT_PATH=/home/alarm/car-unit\n' >&2
+    printf '    then log out and back in.\n' >&2
+    exit 1
+fi
+
+BACKEND="$CAR_UNIT_PATH/backend"
+VENV="$BACKEND/.venv"
+PROG="$(basename "$0")"
+
+# --- helpers ---------------------------------------------------------------
+
+say()  { printf '\033[1m==>\033[0m %s\n' "$*"; }
+warn() { printf '\033[33m==>\033[0m %s\n' "$*" >&2; }
+die()  { printf '\033[31m==>\033[0m %s\n' "$*" >&2; exit 1; }
+
+require_backend() {
+    [ -d "$BACKEND" ] || die "no backend at $BACKEND"
+    [ -f "$BACKEND/pyproject.toml" ] || die "no pyproject.toml in $BACKEND"
+    command -v uv >/dev/null || die "uv not found -- pacman -S uv"
+}
+
+# Stale *.egg-info from an earlier project name confuses setuptools about
+# what is installed, which produces entry points that point at modules
+# that no longer exist.
+clean_artifacts() {
+    local found
+    found=$(find "$BACKEND" -maxdepth 1 -name '*.egg-info' -type d)
+    if [ -n "$found" ]; then
+        say "removing stale build artifacts"
+        printf '%s\n' "$found" | while read -r d; do
+            echo "    $(basename "$d")"
+            rm -rf "$d"
+        done
+    fi
+    find "$BACKEND" -name '__pycache__' -type d \
+        -not -path '*/.venv/*' -exec rm -rf {} + 2>/dev/null || true
+}
+
+# Every name in [project.scripts] should end up as an executable in
+# .venv/bin. A missing one usually means the module path in pyproject
+# does not match the file on disk -- hyphens instead of underscores is
+# the classic.
+verify_entry_points() {
+    local missing=0 name target
+
+    while IFS= read -r line; do
+        name=$(echo "$line" | sed -E 's/^([a-zA-Z0-9_-]+)[[:space:]]*=.*/\1/')
+        target=$(echo "$line" | sed -E 's/.*"([^"]+)".*/\1/')
+        [ -n "$name" ] || continue
+
+        if [ -x "$VENV/bin/$name" ]; then
+            printf '    \033[32mok\033[0m   %-14s %s\n' "$name" "$target"
+        else
+            printf '    \033[31mMISS\033[0m %-14s %s\n' "$name" "$target"
+            missing=$((missing + 1))
+        fi
+    done < <(sed -n '/^\[project.scripts\]/,/^\[/p' "$BACKEND/pyproject.toml" \
+             | grep -E '^[a-zA-Z0-9_-]+[[:space:]]*=')
+
+    if [ "$missing" -gt 0 ]; then
+        warn "$missing entry point(s) missing"
+        warn "check the module path matches the file: cli/bt_call.py needs"
+        warn "  bt-call = \"cli.bt_call:main\"   (underscores in the module)"
+        return 1
+    fi
+}
+
+verify_imports() {
+    local failed=0
+    for mod in carlib carlib.core.errors carlib.dbus.connection \
+               carlib.system.services carlib.location.gps; do
+        if ! "$VENV/bin/python" -c "import $mod" 2>/dev/null; then
+            printf '    \033[31mFAIL\033[0m %s\n' "$mod"
+            failed=$((failed + 1))
+        fi
+    done
+    [ "$failed" -eq 0 ] || { warn "$failed module(s) failed to import"; \
+                            return 1; }
+    echo "    all core modules import"
+}
+
+# --- commands --------------------------------------------------------------
+
+cmd_sync() {
+    require_backend
+    clean_artifacts
+    say "uv sync"
+    (cd "$BACKEND" && uv sync)
+    cmd_check
+}
+
+cmd_entry() {
+    require_backend
+    clean_artifacts
+    say "rebuilding the project package"
+    (cd "$BACKEND" && uv sync --reinstall-package car-unit)
+    cmd_check
+}
+
+cmd_full() {
+    require_backend
+    if [ -d "$VENV" ]; then
+        say "removing $VENV"
+        rm -rf "$VENV"
+    fi
+    clean_artifacts
+    say "uv sync (from scratch)"
+    (cd "$BACKEND" && uv sync)
+    cmd_check
+}
+
+cmd_frozen() {
+    require_backend
+    [ -f "$BACKEND/uv.lock" ] || die "no uv.lock -- run '$PROG sync' first"
+    clean_artifacts
+    say "uv sync --frozen (exact pinned versions)"
+    (cd "$BACKEND" && uv sync --frozen)
+    cmd_check
+}
+
+cmd_check() {
+    require_backend
+    [ -d "$VENV" ] || die "no venv at $VENV -- run '$PROG sync'"
+
+    say "entry points"
+    verify_entry_points || true
+
+    say "imports"
+    verify_imports || true
+
+    say "environment"
+    if [ -n "${PATH##*$VENV/bin*}" ]; then
+        echo "    $VENV/bin is not on PATH"
+        echo "    add it in ~/.config/environment.d/car-unit.conf so"
+        echo "    Waybar and systemd units can find these commands"
+    else
+        echo "    $VENV/bin is on PATH"
+    fi
+}
+
+usage() {
+    sed -n '2,/^set -euo/p' "$0" | sed 's/^#\s\?//' | head -n -1
+    exit "${1:-0}"
+}
+
+# --- dispatch --------------------------------------------------------------
+
+case "${1:-sync}" in
+    sync)    cmd_sync ;;
+    entry)   cmd_entry ;;
+    full)    cmd_full ;;
+    frozen)  cmd_frozen ;;
+    check)   cmd_check ;;
+    -h|--help|help) usage 0 ;;
+    *)       warn "unknown command: $1"; usage 1 ;;
+esac
