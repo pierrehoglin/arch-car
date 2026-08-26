@@ -27,6 +27,10 @@ from dataclasses import dataclass, field, asdict
 from carlib.core.errors import NotAvailableError
 from carlib.system import services
 
+# The unit behind the hotspot. Control goes through
+# services.start('hotspot') so that services.FOLLOWERS applies; this is
+# here for callers that need the unit name for a polkit rule or a
+# systemd drop-in.
 UNIT = 'hostapd.service'
 INTERFACE = 'wlan0'
 

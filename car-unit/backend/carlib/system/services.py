@@ -1,10 +1,11 @@
 """
-Service control: SSH, Bluetooth, hotspot.
+Service control: SSH, Bluetooth, hotspot, wifi.
 
-Each is a named service with a couple of units behind it. The hotspot
-in particular is hostapd plus dnsmasq plus iptables, but only hostapd is
-named here -- the other two follow via BindsTo, so starting hostapd
-starts all three. See HFP_SERVICE_ORDERING.md for that pattern.
+Generic start/stop/status over systemd's D-Bus API. The hotspot is
+registered here as a plain unit so it can be started and queried like
+any other -- carlib.system.hotspot builds on this, adding the radio
+handover, DHCP leases and uplink that a bare service start cannot
+express. Use that module rather than these functions for the hotspot.
 
 Authorisation goes through polkit. Put this in
 /etc/polkit-1/rules.d/50-carunit.rules:
@@ -42,12 +43,12 @@ SERVICES = {
     'wifi': 'iwd.service',
 }
 
-# Units that come up with the front unit but are not controlled
-# directly. Reported by `status` so the picture is complete.
+# Units that come up with a front unit via Wants/BindsTo. They are not
+# controlled directly -- starting the front unit starts all of them --
+# but their state is worth reporting.
 FOLLOWERS = {
     'hotspot': ('dnsmasq.service', 'iptables.service'),
 }
-
 
 @dataclass
 class ServiceState:
@@ -184,17 +185,3 @@ async def set_enabled(name: str, enabled: bool) -> ServiceState:
             hint='needs the manage-unit-files polkit action, which is '
                  'separate from manage-units') from exc
     return await status(name)
-
-
-# --- Hotspot --------------------------------------------------------------
-#
-# Hotspot control lives in carlib.system.hotspot, which knows about the
-# radio conflict, the DHCP leases and the uplink. It is not just a
-# service start.
-#
-# The earlier versions here stopped iwd to free the interface. That is
-# wrong once NetworkManager owns the radio: NM starts iwd as its
-# backend and restarts it, so stopping the unit achieves nothing. Use
-# `nmcli device set wlan0 managed no` instead -- and never
-# `nmcli radio wifi off`, which rfkill-blocks the whole phy and
-# persists across reboots.
