@@ -8,6 +8,9 @@ dependencies = [
 
 [project.optional-dependencies]
 can = ["python-can>=4.0"]
+# The daemon and the client that talks to it. Optional so a machine
+# running only the CLIs against the library does not need them.
+api = ["fastapi>=0.110", "uvicorn>=0.27", "httpx>=0.27"]
 
 [project.scripts]
 bt-call      = "cli.bt_call:main"
@@ -24,6 +27,7 @@ hotspot      = "cli.hotspot:main"
 audio        = "cli.audio:main"
 fm           = "cli.fm:main"
 source       = "cli.source:main"
+carlibd      = "cli.carlibd:main"
 can          = "cli.can:main"
 
 [tool.uv]
