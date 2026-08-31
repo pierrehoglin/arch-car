@@ -29,6 +29,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from carlib.core import state
+from carlib.core.errors import CarError
 from carlib.api import routes
 from carlib.system import source
 
@@ -84,18 +85,22 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title='carlib', lifespan=lifespan)
 
 
-@app.exception_handler(Exception)
-async def handle_error(request: Request, exc: Exception) -> JSONResponse:
+@app.exception_handler(CarError)
+async def handle_error(request: Request, exc: CarError) -> JSONResponse:
     """
     Turn library exceptions into the status codes the CLIs expect.
 
-    The mapping lives in routes.status_for so it can be tested without
-    a web server.
+    Registered against CarError rather than Exception. A handler for
+    Exception looks like it catches everything, but Starlette's
+    ServerErrorMiddleware re-raises afterwards, so the traceback still
+    reaches the log and uvicorn still reports an unhandled ASGI error
+    -- for a perfectly ordinary 503.
+
+    Every exception the library raises derives from CarError, so this
+    covers them all. Anything else really is unexpected and should get
+    Starlette's normal 500 handling, traceback included.
     """
-    status = routes.status_for(exc)
-    if status >= 500:
-        log.exception('unhandled error on %s', request.url.path)
-    return JSONResponse(status_code=status,
+    return JSONResponse(status_code=routes.status_for(exc),
                         content=routes.error_body(exc))
 
 
