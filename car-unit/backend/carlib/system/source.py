@@ -32,15 +32,12 @@ Requires:
     pacman -S playerctl
 """
 
-import os
-import json
 import time
 import asyncio
-from pathlib import Path
 from dataclasses import dataclass, field, asdict
 from typing import AsyncIterator
 
-from carlib.core import settings
+from carlib.core import settings, state
 from carlib.core.errors import NotAvailableError, NotFoundError
 
 PLAYERCTL = 'playerctl'
@@ -77,38 +74,24 @@ TA_MAX_SECONDS = 300.0
 FIELD_SEP = '\x1f'
 
 
-def _runtime_dir() -> Path:
-    base = os.environ.get('XDG_RUNTIME_DIR')
-    return Path(base) if base else Path('/tmp')
-
-
 # What was playing before the last pause, so `toggle` knows what to
-# resume. Per-boot rather than persisted: which source you were on is
-# a property of this drive, not something to carry across an ignition
-# cycle -- the radio should come back on the radio, not on whatever
-# Spotify was doing last week.
-LAST_ACTIVE_FILE = _runtime_dir() / 'carlib-source.json'
+# resume, plus the traffic-announcement bookkeeping. Runtime state, not
+# settings: which source you were on is a property of this drive, not
+# something to carry across an ignition cycle -- the radio should come
+# back on the radio, not on whatever Spotify was doing last week.
+STATE = 'source'
 
 
 def _read_runtime() -> dict:
-    try:
-        data = json.loads(LAST_ACTIVE_FILE.read_text())
-        return data if isinstance(data, dict) else {}
-    except (OSError, json.JSONDecodeError):
-        return {}
+    return state.read(STATE)
 
 
 def _write_runtime(data: dict) -> None:
-    try:
-        LAST_ACTIVE_FILE.write_text(json.dumps(data))
-    except OSError:
-        pass
+    state.write(STATE, data)
 
 
 def _write_last_active(name: str) -> None:
-    data = _read_runtime()
-    data['active'] = name
-    _write_runtime(data)
+    state.update(STATE, active=name)
 
 
 def _read_last_active() -> str:
@@ -125,9 +108,7 @@ def _write_interrupted(name: str) -> None:
     other one would keep refreshing the timestamp, so the timeout
     would never expire.
     """
-    data = _read_runtime()
-    data['interrupted'] = name
-    _write_runtime(data)
+    state.update(STATE, interrupted=name)
 
 
 def _read_interrupted() -> str:
@@ -144,20 +125,17 @@ def request_ta_skip() -> bool:
 
     Returns whether an announcement was actually in progress.
     """
-    data = _read_runtime()
-    if not data.get('interrupted'):
+    if not state.get(STATE, 'interrupted'):
         return False
-    data['skip'] = True
-    _write_runtime(data)
+    state.update(STATE, skip=True)
     return True
 
 
 def _take_ta_skip() -> bool:
     """Consume the skip token, if one is waiting."""
-    data = _read_runtime()
-    if not data.pop('skip', False):
+    if not state.get(STATE, 'skip'):
         return False
-    _write_runtime(data)
+    state.update(STATE, skip=None)
     return True
 
 
@@ -173,9 +151,7 @@ def traffic_enabled() -> bool:
 
 
 def _clear_interrupted() -> None:
-    data = _read_runtime()
-    data.pop('interrupted', None)
-    _write_runtime(data)
+    state.update(STATE, interrupted=None)
 
 
 @dataclass

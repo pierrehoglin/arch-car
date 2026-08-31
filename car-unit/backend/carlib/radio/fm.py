@@ -29,7 +29,7 @@ import asyncio
 from pathlib import Path
 from dataclasses import dataclass, field, asdict
 
-from carlib.core import settings
+from carlib.core import settings, state
 from carlib.system import pipewire
 from carlib.core.errors import NotAvailableError, NotFoundError
 
@@ -103,9 +103,14 @@ def _runtime_dir() -> Path:
     return Path('/tmp')
 
 
-STATE_FILE = _runtime_dir() / 'carlib-fm.json'
+# Runtime state namespaces. Backed by files for a CLI invocation, or
+# by memory when a daemon owns them -- see carlib.core.state.
+STATE = 'fm'
+SCAN = 'fm-scan'
+
+# The RDS stream stays a real file whatever the backend: redsea writes
+# it, and nothing in this process controls that.
 RDS_FILE = _runtime_dir() / 'carlib-fm-rds.jsonl'
-SCAN_FILE = _runtime_dir() / 'carlib-fm-scan.json'
 # Presets, the last station and the default gain live in the shared
 # settings file rather than files of their own -- one place for user
 # configuration, and the atomic writes there matter for anything a car
@@ -443,26 +448,15 @@ def last_gain() -> float:
 # --- Process state ---------------------------------------------------------
 
 def _read_state() -> dict:
-    if not STATE_FILE.exists():
-        return {}
-    try:
-        return json.loads(STATE_FILE.read_text())
-    except (OSError, json.JSONDecodeError):
-        return {}
+    return state.read(STATE)
 
 
 def _write_state(data: dict) -> None:
-    try:
-        STATE_FILE.write_text(json.dumps(data))
-    except OSError:
-        pass
+    state.write(STATE, data)
 
 
 def _clear_state() -> None:
-    try:
-        STATE_FILE.unlink()
-    except OSError:
-        pass
+    state.clear(STATE)
 
 
 def _alive(pgid: int) -> bool:
@@ -983,11 +977,8 @@ def _peak(group: list[tuple[float, float]]) -> Signal:
 
 def load_scan() -> tuple[list[Signal], float]:
     """Cached scan results and when they were taken."""
-    if not SCAN_FILE.exists():
-        return [], 0.0
-    try:
-        data = json.loads(SCAN_FILE.read_text())
-    except (OSError, json.JSONDecodeError):
+    data = state.read(SCAN)
+    if not data:
         return [], 0.0
 
     signals = []
@@ -1007,13 +998,10 @@ def load_scan() -> tuple[list[Signal], float]:
 
 
 def save_scan(signals: list[Signal]) -> None:
-    try:
-        SCAN_FILE.write_text(json.dumps({
-            'taken': time.time(),
-            'signals': [s.to_dict() for s in signals],
-        }))
-    except OSError:
-        pass
+    state.write(SCAN, {
+        'taken': time.time(),
+        'signals': [s.to_dict() for s in signals],
+    })
 
 
 async def scan(threshold: float = SCAN_THRESHOLD_DB,
