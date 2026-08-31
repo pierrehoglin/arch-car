@@ -34,11 +34,13 @@ Requires:
 
 import os
 import json
+import time
 import asyncio
 from pathlib import Path
 from dataclasses import dataclass, field, asdict
 from typing import AsyncIterator
 
+from carlib.core import settings
 from carlib.core.errors import NotAvailableError, NotFoundError
 
 PLAYERCTL = 'playerctl'
@@ -51,6 +53,23 @@ FM = 'fm'
 PLAYING = 'Playing'
 
 POLL_INTERVAL = 2.0
+
+# Traffic announcements are checked far more often than source
+# conflicts, because they can be: reading the RDS state is two file
+# reads and a syscall, while checking MPRIS spawns playerctl. Polling
+# both at the fast rate would multiply the subprocess cost for no gain
+# -- Spotify starting a second late does not matter, a traffic
+# bulletin starting four seconds late does.
+TA_POLL_INTERVAL = 0.5
+
+# Consecutive polls the TA flag must hold before interrupting. A weak
+# signal can flip it for a single group, and switching source on that
+# would stutter between Spotify and the radio.
+TA_DEBOUNCE = 2
+
+# Give up on an announcement that never ends. A stuck flag would
+# otherwise hold the radio indefinitely.
+TA_MAX_SECONDS = 300.0
 
 # Separator for the playerctl format string. Chosen because it is
 # vanishingly unlikely to appear in a track title, unlike a pipe or a
@@ -71,19 +90,92 @@ def _runtime_dir() -> Path:
 LAST_ACTIVE_FILE = _runtime_dir() / 'carlib-source.json'
 
 
-def _write_last_active(name: str) -> None:
+def _read_runtime() -> dict:
     try:
-        LAST_ACTIVE_FILE.write_text(json.dumps({'active': name}))
+        data = json.loads(LAST_ACTIVE_FILE.read_text())
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _write_runtime(data: dict) -> None:
+    try:
+        LAST_ACTIVE_FILE.write_text(json.dumps(data))
     except OSError:
         pass
 
 
+def _write_last_active(name: str) -> None:
+    data = _read_runtime()
+    data['active'] = name
+    _write_runtime(data)
+
+
 def _read_last_active() -> str:
-    try:
-        return str(json.loads(
-            LAST_ACTIVE_FILE.read_text()).get('active', ''))
-    except (OSError, json.JSONDecodeError, TypeError, ValueError):
-        return ''
+    return str(_read_runtime().get('active', ''))
+
+
+def _write_interrupted(name: str) -> None:
+    """
+    Remember what a traffic announcement took over from.
+
+    Only the source name is persisted. The start time is kept in the
+    supervisor's own state: this file has two writers -- the conflict
+    resolver also updates `active` -- and a read-modify-write from the
+    other one would keep refreshing the timestamp, so the timeout
+    would never expire.
+    """
+    data = _read_runtime()
+    data['interrupted'] = name
+    _write_runtime(data)
+
+
+def _read_interrupted() -> str:
+    return str(_read_runtime().get('interrupted', ''))
+
+
+def request_ta_skip() -> bool:
+    """
+    Ask the supervisor to end the current announcement early.
+
+    The supervisor runs in another process, so this leaves a token in
+    the shared runtime file rather than acting directly. It is picked
+    up within one poll -- half a second by default.
+
+    Returns whether an announcement was actually in progress.
+    """
+    data = _read_runtime()
+    if not data.get('interrupted'):
+        return False
+    data['skip'] = True
+    _write_runtime(data)
+    return True
+
+
+def _take_ta_skip() -> bool:
+    """Consume the skip token, if one is waiting."""
+    data = _read_runtime()
+    if not data.pop('skip', False):
+        return False
+    _write_runtime(data)
+    return True
+
+
+def traffic_enabled() -> bool:
+    """
+    Whether traffic announcements may interrupt.
+
+    Read each poll rather than at startup, so toggling the setting
+    takes effect without restarting the supervisor -- which matters
+    when an announcement is being intrusive mid-drive.
+    """
+    return settings.get_bool('fm.traffic', True)
+
+
+def _clear_interrupted() -> None:
+    data = _read_runtime()
+    data.pop('interrupted', None)
+    _write_runtime(data)
 
 
 @dataclass
@@ -115,6 +207,7 @@ class SourceState:
     players: list[Player] = field(default_factory=list)
     fm_playing: bool = False
     paused: list[str] = field(default_factory=list)  # stopped to resolve
+    traffic: bool = False           # a TA interrupt is in progress
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -278,6 +371,25 @@ async def pause_others(keep: str = '') -> list[str]:
     return paused
 
 
+async def traffic_flag() -> bool:
+    """
+    Whether the tuned station is signalling a traffic announcement.
+
+    Only meaningful while the FM pipeline is running: RDS is decoded
+    from the tuned signal, so a stopped radio can never report one.
+    Being paused is fine -- that is the point of pausing rather than
+    stopping.
+    """
+    from carlib.radio import fm as radio
+
+    try:
+        state = await radio.status()
+    except Exception:
+        return False
+
+    return bool(state.playing and state.rds.traffic_announcement)
+
+
 async def select(name: str, **kwargs) -> SourceState:
     """
     Make one source the active one.
@@ -347,9 +459,19 @@ async def toggle_play() -> SourceState:
 
 
 async def supervise(interval: float = POLL_INTERVAL,
-                    priority: str = '') -> AsyncIterator[SourceState]:
+                    priority: str = '',
+                    traffic: bool | None = None,
+                    ta_interval: float = TA_POLL_INTERVAL,
+                    ta_timeout: float = TA_MAX_SECONDS
+                    ) -> AsyncIterator[SourceState]:
     """
-    Enforce one source at a time, yielding when something changes.
+    Enforce one source at a time and handle traffic announcements,
+    yielding whenever something changes.
+
+    Two checks at two rates. Source conflicts are checked every
+    `interval` because that costs a playerctl subprocess; the traffic
+    flag every `ta_interval` because it costs two file reads. The loop
+    runs at the faster rate and does the expensive check periodically.
 
     Polling rather than subscribing to MPRIS signals is deliberate:
     players come and go on the bus, and a subscription would have to be
@@ -358,10 +480,15 @@ async def supervise(interval: float = POLL_INTERVAL,
     logic to get wrong.
 
     With `priority` set, that source wins a conflict. Otherwise the
-    newcomer does, which is what a car radio does when you pick it from
-    your phone.
+    newcomer does, which is what a car radio does when you pick it
+    from your phone. During an announcement FM holds priority
+    regardless, so Spotify starting mid-bulletin cannot take it back.
 
-        async for state in source.supervise(priority='fm'):
+    Traffic handling follows the `fm.traffic` setting unless `traffic`
+    is given explicitly. `source.request_ta_skip()` ends the current
+    announcement early.
+
+        async for state in source.supervise():
             log(state.active)
     """
     # Seed from the current state rather than an empty set. On the
@@ -374,43 +501,134 @@ async def supervise(interval: float = POLL_INTERVAL,
     except Exception:
         previous_playing = set()
 
+    _clear_interrupted()        # stale state from a previous run
+    ta_streak = 0
+    interrupting = False
+    interrupt_started = 0.0
+    # Set when an interrupt is abandoned on timeout. Without it the
+    # still-true flag would rebuild the streak and re-interrupt
+    # immediately, oscillating between sources every few seconds.
+    ta_exhausted = False
+    last_conflict_check = 0.0
+
     while True:
-        try:
-            state = await status()
-        except Exception:
-            await asyncio.sleep(interval)
-            continue
+        now = time.monotonic()
+        event = None
 
-        playing = {p.name for p in state.players if p.playing}
+        # --- traffic announcements, checked often -------------------
+        # The setting is read every poll so it can be toggled without
+        # restarting; an explicit `traffic` argument overrides it, for
+        # a service unit that should never interrupt.
+        ta_on = traffic if traffic is not None else traffic_enabled()
 
-        intervened = []
+        if ta_on or interrupting:
+            try:
+                flag = await traffic_flag()
+            except Exception:
+                flag = False
 
-        if len(playing) > 1:
-            # Someone started while another was already going.
-            if priority and priority in playing:
-                winner = priority
-            else:
-                started = playing - previous_playing
-                if started:
-                    winner = sorted(started)[0]
+            ta_streak = ta_streak + 1 if flag else 0
+
+            if not flag:
+                # The station has stopped signalling, so a future
+                # announcement is allowed to interrupt again.
+                ta_exhausted = False
+
+            if interrupting:
+                came_from = _read_interrupted()
+                # Checked while the flag is still set, not only when it
+                # clears -- a flag stuck true is exactly the case this
+                # exists for.
+                expired = (time.monotonic() - interrupt_started
+                           > ta_timeout)
+                skipped = _take_ta_skip()
+
+                # Turning the setting off mid-announcement ends it too,
+                # which is the obvious reading of switching it off.
+                if not flag or expired or skipped or not ta_on:
+                    interrupting = False
+                    interrupt_started = 0.0
+                    ta_streak = 0
+                    if expired or skipped:
+                        # The flag is probably still set. Without this
+                        # the streak rebuilds and re-interrupts within
+                        # a second, which for a skip would make the
+                        # button appear to do nothing.
+                        ta_exhausted = True
+                    _clear_interrupted()
+                    if came_from and came_from != FM:
+                        try:
+                            await select(came_from)
+                        except (NotAvailableError, NotFoundError):
+                            # The source went away mid-announcement --
+                            # a phone disconnecting, say. Leave the
+                            # radio playing rather than falling silent.
+                            pass
+                    event = await status()
+
+            elif ta_on and ta_streak >= TA_DEBOUNCE and not ta_exhausted:
+                _take_ta_skip()     # discard a token with nothing to skip
+                state = await status()
+                interrupt_started = time.monotonic()
+                if state.active != FM:
+                    _write_interrupted(state.active)
+                    await select(FM)
+                    interrupting = True
+                    event = await status()
+                    event.traffic = True
                 else:
-                    # Both were already playing when we started
-                    # watching, so there is no newcomer to favour.
-                    # Keeping the first is arbitrary but stable.
-                    winner = sorted(playing)[0]
+                    # Already listening to the station carrying it.
+                    # Record nothing: there is nothing to restore.
+                    interrupting = True
 
-            intervened = await pause_others(keep=winner)
-            _write_last_active(winner)
-            state = await status()
-            state.paused = intervened
+        # --- source conflicts, checked less often -------------------
+        if now - last_conflict_check >= interval:
+            last_conflict_check = now
+
+            try:
+                state = await status()
+            except Exception:
+                await asyncio.sleep(ta_interval)
+                continue
+
             playing = {p.name for p in state.players if p.playing}
+            intervened = []
 
-        # Yield on intervention even when the playing set is unchanged.
-        # With a priority set, blocking a hijack leaves the same source
-        # playing -- but "I stopped Spotify taking over" is exactly the
-        # event a caller wants to hear about.
-        if playing != previous_playing or intervened:
-            yield state
-            previous_playing = playing
+            if len(playing) > 1:
+                # Someone started while another was already going.
+                # During an announcement the radio wins regardless.
+                effective = FM if interrupting else priority
 
-        await asyncio.sleep(interval)
+                if effective and effective in playing:
+                    winner = effective
+                else:
+                    started = playing - previous_playing
+                    if started:
+                        winner = sorted(started)[0]
+                    else:
+                        # Both were already playing when we started
+                        # watching, so there is no newcomer to favour.
+                        # Keeping the first is arbitrary but stable.
+                        winner = sorted(playing)[0]
+
+                intervened = await pause_others(keep=winner)
+                _write_last_active(winner)
+                state = await status()
+                state.paused = intervened
+                playing = {p.name for p in state.players if p.playing}
+
+            # Yield on intervention even when the playing set is
+            # unchanged. With a priority set, blocking a hijack leaves
+            # the same source playing -- but "I stopped Spotify taking
+            # over" is exactly the event a caller wants to hear about.
+            if playing != previous_playing or intervened:
+                event = state
+                previous_playing = playing
+
+        if event is not None:
+            event.traffic = interrupting
+            yield event
+            previous_playing = {p.name for p in event.players
+                                if p.playing}
+
+        await asyncio.sleep(ta_interval)
