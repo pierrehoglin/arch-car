@@ -10,11 +10,12 @@ expose it, and `playerctl` drives it. FM is the exception -- it is a
 raw rtl_fm pipeline with no MPRIS interface -- so it is handled
 directly through carlib.radio.fm.
 
-FM is muted rather than stopped when another source takes over. RDS is
+FM is paused rather than stopped when another source takes over.
+Pausing the radio mutes it while the receiver keeps running: RDS is
 only decodable while tuned, so stopping the pipeline would mean no
-traffic announcements; a muted one keeps decoding. The cost is about
-8% of one Pi 4 core, measured, which is worth paying to avoid a
-1.5 second gap at the start of every announcement.
+traffic announcements. The cost is about 8% of one Pi 4 core,
+measured, which is worth paying to avoid a 1.5 second gap at the start
+of every announcement.
 
 Two ways to use this:
 
@@ -31,7 +32,10 @@ Requires:
     pacman -S playerctl
 """
 
+import os
+import json
 import asyncio
+from pathlib import Path
 from dataclasses import dataclass, field, asdict
 from typing import AsyncIterator
 
@@ -52,6 +56,34 @@ POLL_INTERVAL = 2.0
 # vanishingly unlikely to appear in a track title, unlike a pipe or a
 # dash.
 FIELD_SEP = '\x1f'
+
+
+def _runtime_dir() -> Path:
+    base = os.environ.get('XDG_RUNTIME_DIR')
+    return Path(base) if base else Path('/tmp')
+
+
+# What was playing before the last pause, so `toggle` knows what to
+# resume. Per-boot rather than persisted: which source you were on is
+# a property of this drive, not something to carry across an ignition
+# cycle -- the radio should come back on the radio, not on whatever
+# Spotify was doing last week.
+LAST_ACTIVE_FILE = _runtime_dir() / 'carlib-source.json'
+
+
+def _write_last_active(name: str) -> None:
+    try:
+        LAST_ACTIVE_FILE.write_text(json.dumps({'active': name}))
+    except OSError:
+        pass
+
+
+def _read_last_active() -> str:
+    try:
+        return str(json.loads(
+            LAST_ACTIVE_FILE.read_text()).get('active', ''))
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return ''
 
 
 @dataclass
@@ -194,7 +226,7 @@ async def status() -> SourceState:
         # from FM would look like a conflict.
         players.insert(0, Player(
             name=FM,
-            status='Paused' if radio_state.muted else PLAYING,
+            status='Paused' if radio_state.paused else PLAYING,
             artist=radio_state.rds.ps or radio_state.name,
             title=radio_state.rds.radiotext
             or f'{radio_state.frequency:.1f} MHz',
@@ -205,7 +237,7 @@ async def status() -> SourceState:
     return SourceState(
         active=active,
         players=players,
-        fm_playing=radio_state.playing and not radio_state.muted,
+        fm_playing=radio_state.playing and not radio_state.paused,
     )
 
 
@@ -213,11 +245,11 @@ async def pause(name: str) -> None:
     """
     Pause one source by name.
 
-    FM is muted rather than stopped -- see the module docstring.
+    FM is paused rather than stopped -- see the module docstring.
     """
     if name == FM:
         from carlib.radio import fm as radio
-        await radio.mute()
+        await radio.pause()
         return
 
     try:
@@ -250,9 +282,9 @@ async def select(name: str, **kwargs) -> SourceState:
     """
     Make one source the active one.
 
-    For FM this starts playback; for an MPRIS player it sends play.
-    Either way everything else is paused first, so the switch is not
-    briefly two sources at once.
+    For FM this starts playback, or unmutes a pipeline that is already
+    running; for an MPRIS player it sends play. Everything else is
+    then paused.
     """
     state = await status()
     known = {p.name for p in state.players} | {FM}
@@ -260,15 +292,17 @@ async def select(name: str, **kwargs) -> SourceState:
     if name not in known:
         raise NotFoundError('source', name, sorted(known))
 
-    await pause_others(keep=name)
+    _write_last_active(name)
 
+    # Start the wanted source first, then silence the rest. Pausing
+    # first is not enough: pause_others only acts on what is currently
+    # playing, so resuming a paused source would leave anything that
+    # started in the meantime running alongside it.
     if name == FM:
+        # play() resumes a paused pipeline and starts a stopped one,
+        # so the distinction is not this module's to make.
         from carlib.radio import fm as radio
-        state = await radio.status()
-        if state.playing:
-            await radio.unmute()
-        else:
-            await radio.play(**kwargs)
+        await radio.play(**kwargs)
     else:
         try:
             await _run(PLAYERCTL, '-p', name, 'play')
@@ -276,30 +310,40 @@ async def select(name: str, **kwargs) -> SourceState:
             raise NotAvailableError(
                 f'cannot start {name}: {exc}') from exc
 
+    await pause_others(keep=name)
+
     return await status()
 
 
 async def toggle_play() -> SourceState:
-    """Play/pause whatever source is current, without switching."""
-    state = await status()
+    """
+    Pause what is playing, or resume what was paused last.
 
-    if state.fm_playing:
-        from carlib.radio import fm as radio
-        await radio.mute()
+    Resuming goes through select(), which unmutes a running FM
+    pipeline rather than restarting it and pauses everything else --
+    so a toggle cannot leave two sources going.
+    """
+    state = await status()
+    playing = [p for p in state.players if p.playing]
+
+    if playing:
+        current = playing[0].name
+        _write_last_active(current)
+        await pause(current)
         return await status()
 
-    target = state.active or next(
-        (p.name for p in state.players), '')
+    target = _read_last_active()
+
+    # Nothing remembered -- this boot, or the remembered source has
+    # gone away. Prefer a running FM pipeline, since unmuting it is
+    # instant and needs no assumptions.
+    known = {p.name for p in state.players}
+    if target not in known:
+        target = FM if FM in known else ''
     if not target:
-        raise NotFoundError('source', 'any', [])
+        raise NotFoundError('source', 'any', sorted(known))
 
-    if target == FM:
-        from carlib.radio import fm as radio
-        await radio.play()
-    else:
-        await _run(PLAYERCTL, '-p', target, 'play-pause')
-
-    return await status()
+    return await select(target)
 
 
 async def supervise(interval: float = POLL_INTERVAL,
@@ -356,6 +400,7 @@ async def supervise(interval: float = POLL_INTERVAL,
                     winner = sorted(playing)[0]
 
             intervened = await pause_others(keep=winner)
+            _write_last_active(winner)
             state = await status()
             state.paused = intervened
             playing = {p.name for p in state.players if p.playing}

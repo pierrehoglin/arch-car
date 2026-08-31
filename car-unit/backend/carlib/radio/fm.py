@@ -261,7 +261,7 @@ class RadioState:
     frequency: float | None = None
     name: str = ''
     gain: float = DEFAULT_GAIN
-    muted: bool = False
+    paused: bool = False
     node_id: int | None = None
     pid: int | None = None
     started: float | None = None
@@ -633,7 +633,7 @@ async def status() -> RadioState:
         frequency=frequency,
         name=name,
         gain=data.get('gain', DEFAULT_GAIN),
-        muted=bool(data.get('muted', False)),
+        paused=bool(data.get('muted', False)),
         node_id=data.get('node_id'),
         pid=pid,
         started=data.get('started'),
@@ -697,15 +697,47 @@ async def play(station: Station | float | str | None = None,
                squelch: int = 0,
                rds: bool = True) -> RadioState:
     """
-    Tune and start playing. Replaces whatever was playing before.
+    Start or resume playback.
 
-    With no station, resumes whatever was playing last -- which is what
-    a car radio does when you turn it on. Falls back to the first
-    preset, then to the first station a scan found.
+    What it does depends on what is already running:
 
-    Only one RTL-SDR stream can run at a time, so this stops the
-    existing pipeline first rather than failing on a busy device.
+        play()          not running      start the last station
+        play()          paused           resume
+        play()          playing          nothing
+        play(107.4)     not running      start 107.4
+        play(107.4)     paused on 107.4  resume
+        play(107.4)     on 92.7          retune
+
+    Resuming means unmuting a pipeline that is still running, which is
+    instant. Retuning has to restart it, because rtl_fm cannot change
+    frequency in place.
+
+    With no station and nothing running, falls back to the last station
+    played, then the first preset, then the first station a scan found
+    -- so a car radio comes back on where you left it.
     """
+    current = await status()
+
+    # Resume rather than restart when the pipeline is already on the
+    # wanted frequency. Restarting would lose several seconds of RDS
+    # and briefly drop the audio for no reason.
+    if current.playing:
+        same = station is None
+        if not same and not isinstance(station, Station):
+            try:
+                same = abs(parse_frequency(station)
+                           - (current.frequency or 0)) < 0.01
+            except ValueError:
+                same = False
+        elif isinstance(station, Station):
+            same = abs(station.frequency
+                       - (current.frequency or 0)) < 0.01
+
+        if same:
+            if current.paused:
+                return await _set_muted(False)
+            return current
+
     if station is None:
         target = load_last()
         if target is None:
@@ -746,6 +778,13 @@ async def play(station: Station | float | str | None = None,
                 break
             await asyncio.sleep(0.1)
         await asyncio.sleep(0.3)
+
+    # A fresh pipeline starts unmuted, so the flag must not carry
+    # over from whatever was playing before.
+    data = _read_state()
+    if data.get('muted'):
+        data['muted'] = False
+        _write_state(data)
 
     # Start with an empty RDS file so the previous station's
     # groups are not attributed to this one.
@@ -1250,12 +1289,13 @@ async def _resolve_node(force: bool = False) -> int:
     return node.id
 
 
-async def set_muted(muted: bool) -> RadioState:
+async def _set_muted(muted: bool) -> RadioState:
     """
-    Silence the radio without stopping it.
+    Silence the stream without stopping the pipeline.
 
-    The pipeline keeps running, so RDS keeps decoding and a traffic
-    announcement is still noticed.
+    Private because callers should think in terms of pause and play.
+    Muting is the mechanism: the pipeline keeps running, so RDS keeps
+    decoding and a traffic announcement is still noticed.
     """
     state = await status()
     if not state.playing:
@@ -1283,14 +1323,25 @@ async def set_muted(muted: bool) -> RadioState:
     return await status()
 
 
-async def mute() -> RadioState:
-    return await set_muted(True)
+async def pause() -> RadioState:
+    """
+    Stop the audio without stopping the receiver.
+
+    Implemented by muting, so RDS keeps decoding -- which is the whole
+    reason the radio is not simply stopped when another source takes
+    over.
+    """
+    return await _set_muted(True)
 
 
-async def unmute() -> RadioState:
-    return await set_muted(False)
+async def toggle() -> RadioState:
+    """
+    Pause if playing, play if not.
 
-
-async def toggle_mute() -> RadioState:
+    A stopped radio is started, matching how a source button behaves
+    everywhere else.
+    """
     state = await status()
-    return await set_muted(not state.muted)
+    if state.playing and not state.paused:
+        return await pause()
+    return await play()

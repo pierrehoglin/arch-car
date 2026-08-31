@@ -3,11 +3,12 @@
 FM radio via RTL-SDR.
 
     fm                          # what is playing
-    fm play                     # resume the last station
+    fm play                     # start, or resume if paused
     fm play 92.7
     fm play P3                  # by preset name
     fm stop
-    fm mute / fm unmute         # silence without stopping
+    fm pause                    # silence; the receiver keeps running
+    fm toggle                   # play or pause
     fm up / fm down             # step 0.1 MHz
     fm next / fm prev           # step through presets
     fm scan                     # find what is on air
@@ -57,7 +58,7 @@ def show(state) -> None:
 
     rds = state.rds
 
-    print(state.label + ('  [muted]' if state.muted else ''))
+    print(state.label + ('  [paused]' if state.paused else ''))
     print(f'  frequency: {state.frequency:.1f} MHz')
     if state.name and state.name != rds.ps:
         print(f'  preset:    {state.name}')
@@ -95,20 +96,17 @@ async def cmd_play(args) -> None:
     emit_json(state) if args.json else show(state)
 
 
-async def cmd_mute(args) -> None:
-    state = await fm.mute()
-    emit_json(state) if args.json else print('muted')
+async def cmd_pause(args) -> None:
+    state = await fm.pause()
+    emit_json(state) if args.json else print('paused')
 
 
-async def cmd_unmute(args) -> None:
-    state = await fm.unmute()
-    emit_json(state) if args.json else print('unmuted')
-
-
-async def cmd_toggle_mute(args) -> None:
-    state = await fm.toggle_mute()
-    emit_json(state) if args.json else print(
-        'muted' if state.muted else 'unmuted')
+async def cmd_toggle(args) -> None:
+    state = await fm.toggle()
+    if args.json:
+        emit_json(state)
+    else:
+        show(state)
 
 
 async def cmd_stop(args) -> None:
@@ -287,8 +285,8 @@ async def cmd_waybar(args) -> None:
     name = rds.ps or state.name or f'{state.frequency:.1f}'
 
     parts = [GLYPH, name]
-    if state.muted:
-        parts.append('(muted)')
+    if state.paused:
+        parts.append('(paused)')
     if rds.radiotext:
         text = rds.radiotext
         if len(text) > TEXT_LIMIT:
@@ -310,8 +308,8 @@ async def cmd_waybar(args) -> None:
 
     print(json.dumps({
         'text': '  '.join(parts),
-        'alt': 'muted' if state.muted else 'on',
-        'class': 'muted' if state.muted else 'on',
+        'alt': 'paused' if state.paused else 'on',
+        'class': 'paused' if state.paused else 'on',
         'tooltip': '\n'.join(lines),
     }, ensure_ascii=False))
 
@@ -330,9 +328,9 @@ def main() -> int:
             ('stop', cmd_stop, 'stop playback'),
             ('next', cmd_next, 'next preset'),
             ('prev', cmd_prev, 'previous preset'),
-            ('mute', cmd_mute, 'silence without stopping'),
-            ('unmute', cmd_unmute, 'restore audio'),
-            ('mute-toggle', cmd_toggle_mute, 'flip mute'),
+            ('pause', cmd_pause, 'silence without stopping the '
+                                 'receiver'),
+            ('toggle', cmd_toggle, 'play or pause'),
             ('presets', cmd_presets, 'list saved stations'),
             ('rds', cmd_rds, 'decoded RDS detail'),
             ('devices', cmd_devices, 'list RTL-SDR dongles'),
