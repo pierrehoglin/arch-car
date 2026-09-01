@@ -28,14 +28,16 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from carlib.core import state
+from carlib.core import settings, state
 from carlib.core.errors import CarError
 from carlib.api import routes
+from carlib.radio import fm
 from carlib.system import source
 
 log = logging.getLogger('carlib')
 
 _supervisor: asyncio.Task | None = None
+_autostart_task: asyncio.Task | None = None
 
 
 async def _run_supervisor() -> None:
@@ -64,21 +66,55 @@ async def _run_supervisor() -> None:
             await asyncio.sleep(5)
 
 
+async def _autostart() -> None:
+    """
+    Start the radio at boot, if `fm.autostart` is set.
+
+    A background task rather than part of startup: the pipeline needs
+    a second and a half to prove itself, and the daemon should be
+    answering requests before then. A missing dongle should also not
+    stop the daemon from running.
+
+    This replaces a systemd unit that ran `fm play` after the daemon.
+    That needed Requires=, a start limit, and still failed noisily
+    when it raced the socket -- all of which the daemon already knows
+    how to avoid, since it owns the pipeline anyway.
+    """
+    if not settings.get_bool('fm.autostart', False):
+        return
+
+    try:
+        state_ = await fm.play()
+    except CarError as exc:
+        # Worth a warning, not a failure. The rest of the daemon works
+        # without a radio.
+        log.warning('autostart: %s', str(exc).splitlines()[0])
+        return
+    except Exception:
+        log.exception('autostart failed unexpectedly')
+        return
+
+    if state_.frequency is not None:
+        log.info('autostart: radio on %.1f MHz', state_.frequency)
+
+
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
     # Take ownership of runtime state before anything can read it.
     state.use_memory()
     log.info('carlib daemon starting; state held in memory')
 
-    global _supervisor
+    global _supervisor, _autostart_task
     _supervisor = asyncio.create_task(_run_supervisor())
+    _autostart_task = asyncio.create_task(_autostart())
 
     yield
 
-    if _supervisor is not None:
-        _supervisor.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await _supervisor
+    for task in (_autostart_task, _supervisor):
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
     log.info('carlib daemon stopped')
 
 
