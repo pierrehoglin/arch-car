@@ -31,8 +31,14 @@ from carlib.core.errors import (
     TransferError,
 )
 from carlib.api.serialise import from_dict
-from carlib.radio.fm import RadioState, Rds, Signal, Station
-from carlib.system.source import SourceState
+from carlib.radio.fm import (
+    RadioState, Rds, Signal, Station,
+    parse_frequency,
+    DEFAULT_GAIN, SCAN_THRESHOLD_DB, SCAN_INTEGRATION,
+)
+from carlib.system.source import (
+    SourceState, POLL_INTERVAL, TA_POLL_INTERVAL, FM,
+)
 
 # Any host is accepted for a Unix socket; httpx requires one.
 BASE_URL = 'http://carlib'
@@ -146,7 +152,21 @@ async def available() -> bool:
 
 
 class _Fm:
-    """Mirrors carlib.radio.fm over HTTP."""
+    """
+    Mirrors carlib.radio.fm over HTTP.
+
+    Constants and pure functions are re-exported as attributes so a
+    caller can swap `from carlib.radio import fm` for
+    `from carlib.api.client import fm` and nothing else changes.
+    """
+
+    # Constants: values, not state, so reading them locally is right.
+    DEFAULT_GAIN = DEFAULT_GAIN
+    SCAN_THRESHOLD_DB = SCAN_THRESHOLD_DB
+    SCAN_INTEGRATION = SCAN_INTEGRATION
+
+    # Pure function -- parsing a frequency needs no daemon.
+    parse_frequency = staticmethod(parse_frequency)
 
     async def status(self) -> RadioState:
         return from_dict(RadioState, await request('GET', '/fm'))
@@ -188,6 +208,9 @@ class _Fm:
                              timeout=SCAN_TIMEOUT)
         return [from_dict(Signal, r) for r in rows]
 
+    async def devices(self) -> list[str]:
+        return await request('GET', '/fm/devices')
+
     async def signals(self) -> list[Signal]:
         rows = await request('GET', '/fm/signals')
         return [from_dict(Signal, r) for r in rows]
@@ -200,7 +223,7 @@ class _Fm:
     # the daemon keeps one writer and avoids a lost update when the UI
     # and a CLI both save at once.
 
-    async def presets(self) -> list[Station]:
+    async def load_presets(self) -> list[Station]:
         rows = await request('GET', '/fm/presets')
         return [from_dict(Station, r) for r in rows]
 
@@ -217,6 +240,10 @@ class _Fm:
 
 class _Source:
     """Mirrors carlib.system.source over HTTP."""
+
+    POLL_INTERVAL = POLL_INTERVAL
+    TA_POLL_INTERVAL = TA_POLL_INTERVAL
+    FM = FM
 
     async def status(self) -> SourceState:
         return from_dict(SourceState, await request('GET', '/source'))

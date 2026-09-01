@@ -206,6 +206,11 @@ async def delete_fm_preset(frequency: float) -> list[dict]:
     return await routes.fm_remove_preset(frequency)
 
 
+@app.get('/fm/devices')
+async def get_fm_devices() -> list[str]:
+    return await routes.fm_devices()
+
+
 @app.get('/fm/signals')
 async def get_fm_signals() -> list[dict]:
     return await routes.fm_signals()

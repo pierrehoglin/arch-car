@@ -37,7 +37,10 @@ import sys
 import json
 import argparse
 
-from carlib.radio import fm
+# Talks to the carlib daemon rather than the library directly: it owns
+# the runtime state and the RTL-SDR device. Start it with
+# `systemctl --user start carlib`.
+from carlib.api.client import fm
 from carlib.core.output import run, emit_json, global_flags, parse_args
 
 # Nerd Font glyph. Empty box means the font is missing:
@@ -217,7 +220,7 @@ async def cmd_rds(args) -> None:
 
 
 async def cmd_presets(args) -> None:
-    stations = fm.load_presets()
+    stations = await fm.load_presets()
     if args.json:
         emit_json(stations)
         return
@@ -237,14 +240,14 @@ async def cmd_presets(args) -> None:
 
 async def cmd_save(args) -> None:
     frequency = fm.parse_frequency(args.station)
-    fm.add_preset(frequency, args.name or '')
+    await fm.add_preset(frequency, args.name or '')
     print(f'saved {frequency:.1f}'
           f'{" as " + args.name if args.name else ""}')
 
 
 async def cmd_forget(args) -> None:
     frequency = fm.parse_frequency(args.station)
-    fm.remove_preset(frequency)
+    await fm.remove_preset(frequency)
     print(f'removed {frequency:.1f}')
 
 

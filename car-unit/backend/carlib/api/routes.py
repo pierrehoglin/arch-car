@@ -119,6 +119,17 @@ async def fm_scan(threshold: float | None = None,
     return [s.to_dict() for s in await fm.scan(**kwargs)]
 
 
+async def fm_devices() -> list[str]:
+    """
+    RTL-SDR dongles visible to rtl_test.
+
+    Goes through the daemon rather than being run locally: rtl_test
+    opens the device, which would fail or interrupt playback if the
+    daemon already has it.
+    """
+    return await fm.devices()
+
+
 async def fm_signals() -> list[dict]:
     """Cached scan results, without sweeping."""
     signals, _ = fm.load_scan()

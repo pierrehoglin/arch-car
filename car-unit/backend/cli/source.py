@@ -9,13 +9,17 @@ Audio source selection.
     source pause
     source toggle
     source ta-skip              # end a traffic announcement early
-    source supervise            # enforce one source at a time
     source waybar
 
 PipeWire mixes everything by default, so without arbitration the radio
-and Spotify play over each other. `select` pauses the others; the
-supervisor watches for a source starting on its own -- Spotify Connect
-begins playback from your phone, so nothing calls into carlib at all.
+and Spotify play over each other. `select` pauses the others.
+
+Arbitration runs inside the carlib daemon, not here: it watches for a
+source starting on its own, which matters because Spotify Connect
+begins playback from your phone with nothing calling into carlib at
+all. Watch what it decides with:
+
+    journalctl --user -u carlib -f
 
 The supervisor also handles traffic announcements: when the tuned
 station raises its TA flag, the radio takes over and whatever was
@@ -34,9 +38,10 @@ Requires playerctl:
 import sys
 import json
 import argparse
-from datetime import datetime
 
-from carlib.system import source
+# Talks to the carlib daemon rather than the library directly: it owns
+# the runtime state and runs the source supervisor.
+from carlib.api.client import source
 from carlib.core.output import run, emit_json, global_flags, parse_args
 
 GLYPH = '\U000f075a'            # nf-md-speaker
@@ -61,8 +66,9 @@ def show(state) -> None:
         print('\ntraffic announcement in progress', file=sys.stderr)
 
     if state.conflict:
-        print('\nmore than one source is playing -- run '
-              '`source supervise` to arbitrate', file=sys.stderr)
+        print('\nmore than one source is playing -- the carlib '
+              'daemon should have arbitrated;\ncheck '
+              '`systemctl --user status carlib`', file=sys.stderr)
 
 
 async def cmd_status(args) -> None:
@@ -90,7 +96,7 @@ async def cmd_toggle(args) -> None:
 
 async def cmd_ta_skip(args) -> None:
     """End the current traffic announcement early."""
-    skipped = source.request_ta_skip()
+    skipped = await source.request_ta_skip()
     if args.json:
         emit_json({'skipped': skipped})
         return
@@ -99,30 +105,6 @@ async def cmd_ta_skip(args) -> None:
         print('skipping the announcement')
     else:
         print('no announcement to skip')
-
-
-async def cmd_supervise(args) -> None:
-    where = f' (priority: {args.priority})' if args.priority else ''
-    print(f'watching sources{where}, ctrl-c to stop', file=sys.stderr)
-
-    async for state in source.supervise(
-            interval=args.interval,
-            priority=args.priority,
-            traffic=False if args.no_traffic else None,
-            ta_interval=args.ta_interval):
-        if args.json:
-            emit_json(state)
-            continue
-
-        stamp = datetime.now().strftime('%H:%M:%S')
-        active = state.active or 'nothing'
-        marks = []
-        if state.traffic:
-            marks.append('traffic announcement')
-        if state.paused:
-            marks.append(f'paused {", ".join(state.paused)}')
-        note = f'  ({"; ".join(marks)})' if marks else ''
-        print(f'{stamp}  {active}{note}', flush=True)
 
 
 async def cmd_waybar(args) -> None:
@@ -181,23 +163,6 @@ def main() -> int:
                        help='make one source the active one')
     p.set_defaults(fn=cmd_select)
     p.add_argument('name', help='fm, spotifyd, ... see `source list`')
-
-    p = sub.add_parser('supervise', parents=[common],
-                       help='enforce one source at a time')
-    p.set_defaults(fn=cmd_supervise)
-    p.add_argument('--interval', type=float,
-                   default=source.POLL_INTERVAL,
-                   help='seconds between checks')
-    p.add_argument('--priority', default='',
-                   help='this source wins a conflict; otherwise '
-                        'whichever started most recently does')
-    p.add_argument('--ta-interval', type=float,
-                   default=source.TA_POLL_INTERVAL,
-                   help='seconds between traffic-flag checks; cheaper '
-                        'than the source check, so polled faster')
-    p.add_argument('--no-traffic', action='store_true',
-                   help='never interrupt for traffic announcements, '
-                        'overriding the fm.traffic setting')
 
     args = parse_args(ap, 'status', defaults={'json': False})
     return run(args.fn(args))
