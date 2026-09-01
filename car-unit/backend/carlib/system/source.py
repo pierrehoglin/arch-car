@@ -355,6 +355,10 @@ async def traffic_flag() -> bool:
     from the tuned signal, so a stopped radio can never report one.
     Being paused is fine -- that is the point of pausing rather than
     stopping.
+
+    Uses Rds.announcement, which requires TP as well as TA. TA on its
+    own also means "I carry EON data about bulletins elsewhere", which
+    some stations signal permanently.
     """
     from carlib.radio import fm as radio
 
@@ -363,7 +367,7 @@ async def traffic_flag() -> bool:
     except Exception:
         return False
 
-    return bool(state.playing and state.rds.traffic_announcement)
+    return bool(state.playing and state.rds.announcement)
 
 
 async def select(name: str, **kwargs) -> SourceState:

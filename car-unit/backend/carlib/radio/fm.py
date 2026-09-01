@@ -163,6 +163,24 @@ class Rds:
     def has_data(self) -> bool:
         return bool(self.pi or self.ps or self.radiotext)
 
+    @property
+    def announcement(self) -> bool:
+        """
+        A traffic announcement is on air on *this* station.
+
+        TA alone is not enough. The spec defines four states:
+
+            TP=0 TA=0   no traffic information
+            TP=0 TA=1   carries EON data about announcements on other
+                        stations -- not one of its own
+            TP=1 TA=0   carries bulletins, none right now
+            TP=1 TA=1   announcement in progress
+
+        P1 signals TP=0 TA=1 permanently, so keying off TA alone would
+        interrupt forever and never stop.
+        """
+        return self.traffic_program and self.traffic_announcement
+
 
 def parse_rds(text: str, into: 'Rds | None' = None) -> Rds:
     """

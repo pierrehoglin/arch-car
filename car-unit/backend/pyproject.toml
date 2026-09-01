@@ -4,13 +4,16 @@ version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
     "sdbus>=0.11",
+    # The daemon owns runtime state and the CLIs talk to it over the
+    # socket, so these are not optional in practice -- and as an extra
+    # they were dropped by `uv sync --reinstall-package car-unit`.
+    "fastapi>=0.110",
+    "uvicorn>=0.27",
+    "httpx>=0.27",
 ]
 
 [project.optional-dependencies]
 can = ["python-can>=4.0"]
-# The daemon and the client that talks to it. Optional so a machine
-# running only the CLIs against the library does not need them.
-api = ["fastapi>=0.110", "uvicorn>=0.27", "httpx>=0.27"]
 
 [project.scripts]
 bt-call      = "cli.bt_call:main"
