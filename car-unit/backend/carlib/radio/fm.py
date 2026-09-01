@@ -231,17 +231,24 @@ def parse_rds(text: str, into: 'Rds | None' = None) -> Rds:
     return rds
 
 
-def read_rds() -> Rds:
+def read_rds(into: 'Rds | None' = None) -> Rds:
     """
-    Drain the RDS file into an Rds, then truncate it.
+    Drain the RDS file, folding it into an existing Rds if given.
+
+    Passing the cached state as `into` is the right way to accumulate:
+    parse_rds takes the latest value for each field a group carries and
+    leaves absent fields alone, which is what RDS needs -- PS appears
+    in maybe one group in ten, while TA can flip on any of them.
 
     Truncating on read bounds the file: it lives in XDG_RUNTIME_DIR,
     which is tmpfs, and redsea emits roughly 1.5 kB/s. Anything that
     polls -- a status bar, the CLI -- keeps it small. The size cap
     handles the case where nothing polls for hours.
     """
+    rds = into if into is not None else Rds()
+
     if not RDS_FILE.exists():
-        return Rds()
+        return rds
 
     try:
         size = RDS_FILE.stat().st_size
@@ -255,9 +262,9 @@ def read_rds() -> Rds:
         with open(RDS_FILE, 'w'):
             pass
     except OSError:
-        return Rds()
+        return rds
 
-    return parse_rds(text)
+    return parse_rds(text, into=rds)
 
 
 @dataclass
@@ -611,14 +618,13 @@ async def status() -> RadioState:
                  if k in Rds.__dataclass_fields__})
 
     if data.get('rds_enabled', True):
-        fresh = read_rds()
-        if fresh.groups:
-            rds = parse_rds('', into=rds)
-            for name_, value in vars(fresh).items():
-                if name_ == 'groups':
-                    rds.groups += value
-                elif value not in ('', None, [], False):
-                    setattr(rds, name_, value)
+        # Parse straight into the cached object. The previous version
+        # merged field by field and skipped any falsey value, which
+        # meant a `ta` that had once been true could never go back to
+        # false -- the announcement flag latched on for good.
+        before = rds.groups
+        read_rds(into=rds)
+        if rds.groups != before:
             data['rds'] = rds.to_dict()
             _write_state(data)
 
