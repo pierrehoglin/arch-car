@@ -9,8 +9,8 @@
 
   let { title, volume, onvolume }: Props = $props()
 
-  /* Placeholders until the daemon feeds these. Weather comes from
-     /api/weather once that route exists; the clock is local. */
+  /* Temperature and signal are placeholders -- nothing is wired to
+     the daemon yet. The clock is local and real. */
   let now = $state(new Date())
   const outside = 19
   const bars = 4
@@ -78,7 +78,7 @@
     display: grid;
     grid-template-columns: 1fr auto 1fr;
     align-items: center;
-    height: 68px;
+    height: 64px;
     padding: 0 24px;
     background: var(--bar);
     border-bottom: 1px solid var(--hairline);

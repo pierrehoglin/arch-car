@@ -17,7 +17,11 @@
 </script>
 
 <nav class="rail" aria-label="Main">
-  <img class="logo" src={logo} alt="Saab" />
+  <!-- Exactly as tall as the header, so the badge sits centred in the
+       corner the two chrome edges make rather than floating near it. -->
+  <div class="badge">
+    <img src={logo} alt="Saab" />
+  </div>
 
   <div class="items">
     {#each NAV as item (item.href)}
@@ -51,17 +55,24 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    width: 98px;
+    width: 120px;
     height: 100%;
-    padding: 12px 0 10px;
+    padding: 0 0 10px;
     background: var(--rail);
     border-right: 1px solid var(--hairline);
   }
 
-  .logo {
+  .badge {
+    display: grid;
+    place-items: center;
+    width: 100%;
+    height: 64px;
+    flex-shrink: 0;
+  }
+
+  .badge img {
     width: 34px;
     height: 34px;
-    margin-bottom: 18px;
     border-radius: 50%;
   }
 
@@ -69,6 +80,7 @@
     display: flex;
     flex-direction: column;
     width: 100%;
+    margin-top: 6px;
   }
 
   .item {

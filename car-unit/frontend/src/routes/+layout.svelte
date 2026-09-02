@@ -64,14 +64,14 @@
 <style>
   .shell {
     display: grid;
-    grid-template-columns: 98px 1fr;
+    grid-template-columns: 120px 1fr;
     height: 100%;
     background: var(--bg);
   }
 
   .main {
     display: grid;
-    grid-template-rows: 68px 1fr;
+    grid-template-rows: 64px 1fr;
     min-width: 0;
   }
 
