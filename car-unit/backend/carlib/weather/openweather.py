@@ -8,9 +8,9 @@ from their own endpoint, so one Forecast costs three calls.
 
 The response limits shape that choice. The 1h timeline returns at most
 20 records and 1day at most 10, with further pages costing an extra
-call each. Three calls give 20 hours of hourly detail and 10 days of
-daily -- more than anything here displays, and roughly 144 calls a day
-against the 1,000 free once the cache is doing its job.
+call each. Two extra pages bring the hourly window to 48 hours, making
+a full fetch five calls -- roughly 240 a day against the 1,000 free,
+which a car that is not running constantly will not approach.
 
 Requires a "One Call by Call" subscription. A 3.0 subscription does
 not cover 4.0; they are separate, and the key returns 401 until you
@@ -50,6 +50,13 @@ DAILY_HOURS = 24
 
 # Endpoints we do not call. 1min and 15min are finer than anything
 # here shows, and alerts need a second request per alert id.
+
+# The 1h timeline returns 20 records at a time, so 48 hours takes
+# three requests. Each page counts against the quota, making a full
+# fetch five calls rather than three -- about 240 a day against the
+# 1,000 free, which is fine for a car that is not running constantly.
+HOURLY_HOURS_WANTED = 48
+HOURLY_PAGE_LIMIT = 3
 
 
 # Condition codes, grouped by leading digit.
@@ -203,7 +210,7 @@ def parse_day(entry: dict) -> Conditions:
 @register
 class OpenWeatherProvider(Provider):
     name = 'openweather'
-    description = ('OpenWeather One Call 4.0 -- 20h hourly, 10 day '
+    description = ('OpenWeather One Call 4.0 -- 48h hourly, 10 day '
                    'daily; needs a One Call by Call subscription')
     global_coverage = True
 
@@ -227,11 +234,11 @@ class OpenWeatherProvider(Provider):
             'units': 'metric',
         }
 
-        # Three endpoints, fetched together. Sequentially this would
-        # be three round trips on a link that may be cellular.
+        # Fetched together. Sequentially this would be several round
+        # trips on a link that may be cellular.
         current, hourly, daily = await asyncio.gather(
             self._get_json(CURRENT_URL, params=params),
-            self._get_json(HOURLY_URL, params=params),
+            self._hourly_pages(params),
             self._get_json(DAILY_URL, params=params),
             return_exceptions=True,
         )
@@ -244,9 +251,41 @@ class OpenWeatherProvider(Provider):
 
         return self.parse(
             current[0],
-            hourly[0] if not isinstance(hourly, BaseException) else {},
+            hourly if not isinstance(hourly, BaseException) else {},
             daily[0] if not isinstance(daily, BaseException) else {},
             latitude, longitude, altitude)
+
+    async def _hourly_pages(self, params: dict) -> dict:
+        """
+        Follow `next` until we have enough hours.
+
+        The endpoint returns 20 records per response and hands back a
+        prepared URL for the following page. That URL already carries
+        the key and coordinates, so it is fetched as-is.
+
+        Pages are sequential by necessity -- each one names the next.
+        Failures partway are kept rather than discarded: 20 hours of
+        forecast beats none.
+        """
+        body, _ = await self._get_json(HOURLY_URL, params=params)
+        rows = list(body.get('data') or [])
+
+        for _ in range(HOURLY_PAGE_LIMIT - 1):
+            if len(rows) >= HOURLY_HOURS_WANTED:
+                break
+            following = body.get('next')
+            if not following:
+                break
+            try:
+                body, _ = await self._get_json(following)
+            except NotAvailableError:
+                break
+            page = body.get('data') or []
+            if not page:
+                break
+            rows.extend(page)
+
+        return {**body, 'data': rows[:HOURLY_HOURS_WANTED]}
 
     def parse(self, current: dict, hourly: dict, daily: dict,
               latitude: float, longitude: float,
