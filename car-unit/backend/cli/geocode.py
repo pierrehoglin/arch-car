@@ -2,6 +2,7 @@
 """
 Address search and lookup.
 
+    geocode suggest "Kungsg"            # type-ahead, as you type
     geocode search "Kungsgatan 12 Stockholm"
     geocode search "Ullevi" --limit 3
     geocode search "Berlin" --anywhere
@@ -15,8 +16,18 @@ anything else can then use by name:
     geocode search "Slottsskogen" --save park
     weather park
 
-Uses Nominatim, the OpenStreetMap geocoder. It runs on donated
-servers with limited capacity, so its usage policy is binding:
+Two services, because they permit different things.
+
+Suggestions come from Photon, which indexes OpenStreetMap data for
+search-as-you-type. Its demo server asks that requests stay within a
+reasonable limit; extensive usage is throttled or banned, and there
+is no availability guarantee. Point `geocoding.photon_url` at your
+own instance if you need more.
+
+Search and reverse lookups use Nominatim, which gives better
+structured addresses but forbids autocomplete outright -- it is
+listed among the uses that get you banned. It runs on donated servers
+with limited capacity, so its usage policy is binding:
 
     https://operations.osmfoundation.org/policies/nominatim/
 
@@ -115,6 +126,36 @@ async def cmd_search(args) -> None:
     attribution()
 
 
+async def cmd_suggest(args) -> None:
+    """
+    Type-ahead suggestions.
+
+    Uses Photon rather than Nominatim: Nominatim forbids autocomplete
+    outright, and Photon indexes the same data for exactly this.
+    """
+    country = '' if args.anywhere else args.country
+    results = await geocoding.suggest(args.query, limit=args.limit,
+                                      country=country)
+
+    if args.json:
+        emit_json(results)
+        return
+
+    if not results:
+        if len(args.query.strip()) < geocoding.MIN_SUGGEST_CHARS:
+            print(f'type at least {geocoding.MIN_SUGGEST_CHARS} '
+                  f'characters', file=sys.stderr)
+        else:
+            print('no suggestions')
+        return
+
+    for address in results:
+        print(f'{address.short}')
+        print(f'   {address.display_name}')
+
+    print(f'\n{geocoding.ATTRIBUTION}', file=sys.stderr)
+
+
 async def cmd_reverse(args) -> None:
     if args.latitude is not None and args.longitude is not None:
         latitude, longitude = args.latitude, args.longitude
@@ -200,6 +241,14 @@ def main() -> int:
                         'setting')
     p.add_argument('--save', default='',
                    help='save the first result as a named place')
+
+    p = sub.add_parser('suggest', parents=[common],
+                       help='type-ahead suggestions')
+    p.set_defaults(fn=cmd_suggest)
+    p.add_argument('query')
+    p.add_argument('--limit', type=int, default=5)
+    p.add_argument('--country', default=None)
+    p.add_argument('--anywhere', action='store_true')
 
     p = sub.add_parser('reverse', parents=[common],
                        help='the address at a point, or here')

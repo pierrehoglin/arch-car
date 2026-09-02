@@ -53,6 +53,30 @@ from carlib.core.errors import NotAvailableError, NotFoundError
 SEARCH_URL = 'https://nominatim.openstreetmap.org/search'
 REVERSE_URL = 'https://nominatim.openstreetmap.org/reverse'
 
+# Photon, for type-ahead. Nominatim forbids autocomplete outright --
+# it is listed among the uses that get you banned -- because the
+# query pattern is expensive against its database. Photon indexes the
+# same OpenStreetMap data in OpenSearch specifically for
+# search-as-you-type, which is why the OSM community points at it for
+# exactly this.
+#
+#     https://github.com/komoot/photon
+#
+# The demo server is free and unauthenticated, and its terms are that
+# requests stay within a reasonable limit; extensive usage will be
+# throttled or banned outright. There is no published number, and
+# they offer no availability guarantee -- for anything heavier they
+# ask you to run your own instance, which is why the URL is a
+# setting.
+DEFAULT_PHOTON_URL = 'https://photon.komoot.io'
+
+# Matching what other Photon clients default to for the public server.
+PHOTON_MIN_INTERVAL = 1.0
+
+# Below this a query matches half the country and the results are
+# useless, so it is not worth a request.
+MIN_SUGGEST_CHARS = 3
+
 ATTRIBUTION = 'Data \u00a9 OpenStreetMap contributors (ODbL)'
 
 STATE = 'geocoding'
@@ -99,6 +123,9 @@ DEFAULT_COUNTRY = 'se'
 
 _last_request = 0.0
 _lock = asyncio.Lock()
+
+_last_photon = 0.0
+_photon_lock = asyncio.Lock()
 
 # Timestamps of recent automatic requests, for the per-minute budget.
 _auto_requests: deque = deque()
@@ -306,14 +333,17 @@ def _remember(key: str, address: Address) -> None:
 # --- Requests --------------------------------------------------------------
 
 async def _get(url: str, params: dict,
-               interval: float = MIN_INTERVAL) -> object:
+               interval: float = MIN_INTERVAL,
+               photon: bool = False) -> object:
     """
-    One request, no faster than the policy allows.
+    One request, no faster than the service allows.
 
     The gap is enforced under a lock so concurrent callers queue
-    rather than all firing at once.
+    rather than all firing at once. Nominatim and Photon are paced
+    separately -- they are different services with different limits,
+    and one should not be held up by the other.
     """
-    global _last_request
+    global _last_request, _last_photon
 
     try:
         import httpx
@@ -321,9 +351,12 @@ async def _get(url: str, params: dict,
         raise NotAvailableError('httpx is not installed',
                                 hint='uv sync') from exc
 
-    async with _lock:
+    lock = _photon_lock if photon else _lock
+
+    async with lock:
         loop = asyncio.get_running_loop()
-        wait = interval - (loop.time() - _last_request)
+        last = _last_photon if photon else _last_request
+        wait = interval - (loop.time() - last)
         if wait > 0:
             await asyncio.sleep(wait)
 
@@ -338,33 +371,39 @@ async def _get(url: str, params: dict,
                                             headers=headers)
         except Exception as exc:
             raise NotAvailableError(
-                f'cannot reach Nominatim: {exc}',
+                f'cannot reach {"Photon" if photon else "Nominatim"}: '
+                f'{exc}',
                 hint='check the network connection') from exc
         finally:
-            _last_request = loop.time()
+            if photon:
+                _last_photon = loop.time()
+            else:
+                _last_request = loop.time()
+
+    service = 'Photon' if photon else 'Nominatim'
 
     if response.status_code == 403:
         raise NotAvailableError(
-            'Nominatim refused the request (403)',
+            f'{service} refused the request (403)',
             hint='the User-Agent must identify this application, and '
                  'the rate limit is 1 request per second. See '
                  'https://operations.osmfoundation.org/policies/'
                  'nominatim/')
     if response.status_code == 429:
         raise NotAvailableError(
-            'Nominatim rate limited this client (429)',
+            f'{service} rate limited this client (429)',
             hint='requests are being made too often; see '
                  'https://operations.osmfoundation.org/policies/'
                  'nominatim/')
     if response.status_code >= 400:
         raise NotAvailableError(
-            f'Nominatim request failed ({response.status_code})')
+            f'{service} request failed ({response.status_code})')
 
     try:
         return response.json()
     except ValueError as exc:
         raise NotAvailableError(
-            'Nominatim response was not JSON') from exc
+            f'{service} response was not JSON') from exc
 
 
 def default_country() -> str:
@@ -410,6 +449,120 @@ async def search(query: str, limit: int = 5,
         return []
 
     return [parse_address(item) for item in payload]
+
+
+# --- Autocomplete ----------------------------------------------------------
+
+def photon_url() -> str:
+    return settings.get_str('geocoding.photon_url',
+                            DEFAULT_PHOTON_URL).rstrip('/')
+
+
+def parse_photon(feature: dict) -> Address:
+    """
+    One Photon GeoJSON feature.
+
+    A flatter shape than Nominatim: address components sit directly in
+    properties rather than nested, and coordinates are GeoJSON order,
+    longitude first.
+    """
+    props = feature.get('properties') or {}
+    coords = (feature.get('geometry') or {}).get('coordinates') or []
+
+    try:
+        longitude = float(coords[0])
+        latitude = float(coords[1])
+    except (IndexError, TypeError, ValueError):
+        latitude = longitude = 0.0
+
+    def text(key: str) -> str:
+        value = props.get(key)
+        return str(value) if value else ''
+
+    address = Address(
+        latitude=latitude,
+        longitude=longitude,
+        name=text('name'),
+        house_number=text('housenumber'),
+        road=text('street'),
+        suburb=text('district'),
+        postcode=text('postcode'),
+        city=text('city'),
+        county=text('county'),
+        state=text('state'),
+        country=text('country'),
+        country_code=text('countrycode').upper(),
+        category=text('osm_key'),
+        kind=text('osm_value'),
+        osm_id=text('osm_id'),
+    )
+
+    # Photon has no display_name, so build one. Without it a result
+    # is hard to tell apart from others of the same name.
+    parts = [p for p in (address.name or address.street,
+                         address.house_number if address.name else '',
+                         address.postcode, address.city or address.county,
+                         address.state, address.country) if p]
+    address.display_name = ', '.join(dict.fromkeys(parts))
+
+    return address
+
+
+async def suggest(query: str, limit: int = 5,
+                  latitude: float | None = None,
+                  longitude: float | None = None,
+                  country: str | None = None) -> list[Address]:
+    """
+    Type-ahead suggestions for a partial query.
+
+    Biased towards a position when one is given, which matters in a
+    car: "Kungsgatan" exists in most Swedish towns, and the one you
+    want is the one you are near. Falls back to the current position
+    so callers usually need not pass it.
+
+    Short queries return nothing rather than making a request -- two
+    characters match half the country and would waste a call on
+    results nobody wants.
+
+    Photon has no country parameter, so the filter is applied to the
+    results. Coarser than Nominatim's, but it costs no extra request.
+    """
+    text = str(query).strip()
+    if len(text) < MIN_SUGGEST_CHARS:
+        return []
+
+    if country is None:
+        country = default_country()
+
+    if latitude is None or longitude is None:
+        position = current_position()
+        if position is not None:
+            latitude, longitude = position
+
+    params: dict = {
+        'q': text,
+        # Ask for extra, since filtering by country happens after.
+        'limit': max(1, min(int(limit) * 3, 50)),
+    }
+    if latitude is not None and longitude is not None:
+        params['lat'] = round(latitude, 4)
+        params['lon'] = round(longitude, 4)
+
+    payload = await _get(f'{photon_url()}/api', params,
+                         interval=PHOTON_MIN_INTERVAL,
+                         photon=True)
+
+    if not isinstance(payload, dict):
+        return []
+
+    results = [parse_photon(f) for f in payload.get('features') or []]
+
+    if country:
+        wanted = country.strip().upper()
+        results = [r for r in results
+                   if not r.country_code or r.country_code == wanted]
+
+    return results[:limit]
 
 
 async def reverse(latitude: float, longitude: float,

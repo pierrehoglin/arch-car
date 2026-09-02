@@ -203,6 +203,15 @@ class SelectBody(BaseModel):
     name: str
 
 
+class PlaceBody(BaseModel):
+    name: str
+    latitude: float | None = None
+    longitude: float | None = None
+    altitude: float | None = None
+    address: str = ''
+    lookup: bool = True
+
+
 # --- Routes ----------------------------------------------------------------
 
 @app.get('/health')
@@ -313,3 +322,61 @@ async def post_source_toggle() -> dict:
 @app.post('/source/ta-skip')
 async def post_source_ta_skip() -> dict:
     return await routes.source_ta_skip()
+
+
+# --- Location ---------------------------------------------------------------
+
+@app.get('/geocode/suggest')
+async def get_geocode_suggest(
+        q: str,
+        limit: int = 5,
+        lat: float | None = None,
+        lon: float | None = None,
+        country: str | None = None) -> list[dict]:
+    return await routes.geocode_suggest(q, limit, lat, lon, country)
+
+
+@app.get('/geocode/search')
+async def get_geocode_search(
+        q: str,
+        limit: int = 5,
+        country: str | None = None) -> list[dict]:
+    return await routes.geocode_search(q, limit, country)
+
+
+@app.get('/geocode/reverse')
+async def get_geocode_reverse(lat: float, lon: float,
+                              refresh: bool = False) -> dict:
+    return await routes.geocode_reverse(lat, lon, refresh)
+
+
+@app.get('/geocode/current')
+async def get_geocode_current() -> dict | None:
+    return await routes.geocode_current()
+
+
+@app.get('/places')
+async def get_places() -> list[dict]:
+    return await routes.places_list()
+
+
+@app.get('/places/current')
+async def get_places_current() -> dict | None:
+    return await routes.places_current()
+
+
+@app.get('/places/{name}')
+async def get_place(name: str) -> dict:
+    return await routes.places_resolve(name)
+
+
+@app.post('/places')
+async def post_place(body: PlaceBody) -> list[dict]:
+    return await routes.places_save(body.name, body.latitude,
+                                    body.longitude, body.altitude,
+                                    body.address, body.lookup)
+
+
+@app.delete('/places/{name}')
+async def delete_place(name: str) -> list[dict]:
+    return await routes.places_remove(name)

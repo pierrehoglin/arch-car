@@ -39,6 +39,8 @@ from carlib.radio.fm import (
 from carlib.system.source import (
     SourceState, POLL_INTERVAL, TA_POLL_INTERVAL, FM,
 )
+from carlib.location.geocoding import Address
+from carlib.location.places import Place, CURRENT
 
 # Any host is accepted for a Unix socket; httpx requires one.
 BASE_URL = 'http://carlib'
@@ -88,7 +90,8 @@ def _raise_for(status: int, body: Any) -> None:
 
 async def request(method: str, path: str,
                   body: dict | None = None,
-                  timeout: float = TIMEOUT) -> Any:
+                  timeout: float = TIMEOUT,
+                  query: dict | None = None) -> Any:
     """
     One request to the daemon over its Unix socket.
 
@@ -118,7 +121,8 @@ async def request(method: str, path: str,
         async with httpx.AsyncClient(transport=transport,
                                      base_url=BASE_URL,
                                      timeout=timeout) as client:
-            response = await client.request(method, path, json=body)
+            response = await client.request(method, path, json=body,
+                                            params=query)
     except Exception as exc:
         if isinstance(exc, CarError):
             raise
@@ -265,5 +269,85 @@ class _Source:
         return bool(result.get('skipped', False))
 
 
+class _Geocoding:
+    """Mirrors carlib.location.geocoding over HTTP."""
+
+    CURRENT = CURRENT
+
+    async def suggest(self, query: str, limit: int = 5,
+                      latitude: float | None = None,
+                      longitude: float | None = None,
+                      country: str | None = None,
+                      **_ignored) -> list[Address]:
+        params: dict = {'q': query, 'limit': limit}
+        if latitude is not None:
+            params['lat'] = latitude
+        if longitude is not None:
+            params['lon'] = longitude
+        if country is not None:
+            params['country'] = country
+        rows = await request('GET', '/geocode/suggest', query=params)
+        return [from_dict(Address, r) for r in rows]
+
+    async def search(self, query: str, limit: int = 5,
+                     country: str | None = None,
+                     **_ignored) -> list[Address]:
+        params: dict = {'q': query, 'limit': limit}
+        if country is not None:
+            params['country'] = country
+        rows = await request('GET', '/geocode/search', query=params)
+        return [from_dict(Address, r) for r in rows]
+
+    async def reverse(self, latitude: float, longitude: float,
+                      use_cache: bool = True, **_ignored) -> Address:
+        row = await request('GET', '/geocode/reverse',
+                            query={'lat': latitude, 'lon': longitude,
+                                   'refresh': not use_cache})
+        return from_dict(Address, row)
+
+    async def current(self) -> Address | None:
+        row = await request('GET', '/geocode/current')
+        return from_dict(Address, row) if row else None
+
+
+class _Places:
+    """Mirrors carlib.location.places over HTTP."""
+
+    CURRENT = CURRENT
+
+    async def saved(self) -> list[Place]:
+        rows = await request('GET', '/places')
+        return [from_dict(Place, r) for r in rows]
+
+    async def current(self) -> Place | None:
+        row = await request('GET', '/places/current')
+        return from_dict(Place, row) if row else None
+
+    async def resolve(self, name: str | None = None) -> Place:
+        row = await request('GET', f'/places/{name or CURRENT}')
+        return from_dict(Place, row)
+
+    async def here(self) -> Place:
+        return await self.resolve(CURRENT)
+
+    async def save(self, name: str, latitude: float | None = None,
+                   longitude: float | None = None,
+                   altitude: float | None = None,
+                   address: str = '', lookup: bool = True,
+                   **_ignored) -> list[Place]:
+        rows = await request('POST', '/places', {
+            'name': name, 'latitude': latitude,
+            'longitude': longitude, 'altitude': altitude,
+            'address': address, 'lookup': lookup,
+        })
+        return [from_dict(Place, r) for r in rows]
+
+    async def remove(self, name: str) -> list[Place]:
+        rows = await request('DELETE', f'/places/{name}')
+        return [from_dict(Place, r) for r in rows]
+
+
 fm = _Fm()
 source = _Source()
+geocoding = _Geocoding()
+places = _Places()

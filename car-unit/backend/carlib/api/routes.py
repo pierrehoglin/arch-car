@@ -16,6 +16,7 @@ from carlib.core.errors import (
     NotAvailableError,
     TransferError,
 )
+from carlib.location import geocoding, places
 from carlib.radio import fm
 from carlib.system import source
 
@@ -157,6 +158,74 @@ async def source_toggle() -> dict:
 
 async def source_ta_skip() -> dict:
     return {'skipped': source.request_ta_skip()}
+
+
+# --- Location ---------------------------------------------------------------
+
+async def geocode_suggest(query: str, limit: int = 5,
+                          latitude: float | None = None,
+                          longitude: float | None = None,
+                          country: str | None = None) -> list[dict]:
+    rows = await geocoding.suggest(query, limit=limit,
+                                   latitude=latitude,
+                                   longitude=longitude,
+                                   country=country)
+    return [r.to_dict() for r in rows]
+
+
+async def geocode_search(query: str, limit: int = 5,
+                         country: str | None = None) -> list[dict]:
+    rows = await geocoding.search(query, limit=limit, country=country)
+    return [r.to_dict() for r in rows]
+
+
+async def geocode_reverse(latitude: float, longitude: float,
+                          refresh: bool = False) -> dict:
+    address = await geocoding.reverse(latitude, longitude,
+                                      use_cache=not refresh)
+    return address.to_dict()
+
+
+async def geocode_current() -> dict | None:
+    """
+    Our own address, from the cache.
+
+    Never queries, so a UI can poll it as often as it likes.
+    """
+    address = geocoding.current()
+    return address.to_dict() if address else None
+
+
+async def places_list() -> list[dict]:
+    return [p.to_dict() for p in places.saved()]
+
+
+async def places_current() -> dict | None:
+    place = places.current()
+    return place.to_dict() if place else None
+
+
+async def places_save(name: str, latitude: float | None = None,
+                      longitude: float | None = None,
+                      altitude: float | None = None,
+                      address: str = '',
+                      lookup: bool = True) -> list[dict]:
+    if latitude is None or longitude is None:
+        here = await places.here()
+        latitude, longitude = here.latitude, here.longitude
+        altitude = here.altitude if altitude is None else altitude
+
+    rows = await places.save(name, latitude, longitude, altitude,
+                             address=address, lookup=lookup)
+    return [p.to_dict() for p in rows]
+
+
+async def places_remove(name: str) -> list[dict]:
+    return [p.to_dict() for p in places.remove(name)]
+
+
+async def places_resolve(name: str | None = None) -> dict:
+    return (await places.resolve(name)).to_dict()
 
 
 # --- Health ----------------------------------------------------------------
