@@ -31,6 +31,7 @@ from pydantic import BaseModel
 from carlib.core import settings, state
 from carlib.core.errors import CarError
 from carlib.api import routes
+from carlib.location import geocoding
 from carlib.radio import fm
 from carlib.system import source
 
@@ -38,6 +39,7 @@ log = logging.getLogger('carlib')
 
 _supervisor: asyncio.Task | None = None
 _autostart_task: asyncio.Task | None = None
+_geocoder: asyncio.Task | None = None
 
 
 async def _run_supervisor() -> None:
@@ -98,19 +100,48 @@ async def _autostart() -> None:
         log.info('autostart: radio on %.1f MHz', state_.frequency)
 
 
+async def _run_geocoder() -> None:
+    """
+    Keep the current address up to date as the car moves.
+
+    Here rather than in its own service because Nominatim's rate
+    limit applies across the whole application: two processes would
+    each keep their own limiter and could exceed it between them.
+
+    Off by default. It is a third-party service with a usage policy
+    attached, so it should be a deliberate choice:
+
+        settings set geocoding.auto true
+    """
+    while True:
+        if not settings.get_bool('geocoding.auto', False):
+            await asyncio.sleep(60)
+            continue
+
+        try:
+            async for address in geocoding.watch():
+                log.info('location: %s', address.short)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception('geocoder failed; restarting in 60s')
+            await asyncio.sleep(60)
+
+
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
     # Take ownership of runtime state before anything can read it.
     state.use_memory()
     log.info('carlib daemon starting; state held in memory')
 
-    global _supervisor, _autostart_task
+    global _supervisor, _autostart_task, _geocoder
     _supervisor = asyncio.create_task(_run_supervisor())
     _autostart_task = asyncio.create_task(_autostart())
+    _geocoder = asyncio.create_task(_run_geocoder())
 
     yield
 
-    for task in (_autostart_task, _supervisor):
+    for task in (_autostart_task, _geocoder, _supervisor):
         if task is not None:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):

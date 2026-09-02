@@ -360,6 +360,18 @@ CATALOGUE: tuple[Known, ...] = (
           'instead of using GPS.', 'float'),
     Known('location.altitude', None, 'Altitude in metres for the '
           'pinned position.', 'float'),
+
+    Known('geocoding.auto', False, 'Look up the current address as '
+          'the car moves. Uses Nominatim, whose usage policy applies: '
+          'operations.osmfoundation.org/policies/nominatim/', 'bool'),
+    Known('geocoding.move_metres', 1000.0, 'How far to move before '
+          'looking up the address again. Lower is fine -- the 4 per '
+          'minute ceiling is enforced separately.', 'float'),
+    Known('geocoding.min_move_metres', 50.0, 'Shortest move that can '
+          'trigger a lookup once the address has gone stale.',
+          'float'),
+    Known('geocoding.stale_seconds', 120.0, 'After this, a short move '
+          'is enough to look the address up again.', 'float'),
 )
 
 _BY_KEY = {entry.key: entry for entry in CATALOGUE}

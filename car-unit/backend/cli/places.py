@@ -3,7 +3,8 @@
 Named locations.
 
     places                      # list them
-    places save home            # saves the current GPS position
+    places current              # where we are, with its address
+    places save home            # saves the current position
     places save work --latitude 59.3293 --longitude 18.0686
     places show home
     places forget work
@@ -12,8 +13,12 @@ Named locations.
 Saved once, usable by anything -- the weather command takes a place
 name, and a future map or geofence would use the same list.
 
-"here" is reserved for the GPS position. To pin it, useful on a bench
-with no sky view:
+"current" is where we are now, kept up to date by the geocoder as the
+car moves -- so anything wanting the position and its address can ask
+for it by name rather than reading the GPS. "here" is an older name
+for the same thing.
+
+To pin the position, useful on a bench with no sky view:
 
     settings set location.latitude 62.3874
     settings set location.longitude 17.3116
@@ -28,6 +33,8 @@ from carlib.core.output import run, emit_json, global_flags, parse_args
 
 def show(place) -> None:
     print(place.name)
+    if place.address:
+        print(f'  {place.address}')
     print(f'  {place.latitude:.4f}, {place.longitude:.4f}')
     if place.altitude is not None:
         print(f'  {place.altitude:.0f} m')
@@ -48,9 +55,7 @@ async def cmd_list(args) -> None:
 
     width = max(len(p.name) for p in saved)
     for place in saved:
-        alt = f'  {place.altitude:>5.0f} m' if place.altitude else ''
-        print(f'  {place.name:<{width}}  {place.latitude:>9.4f}, '
-              f'{place.longitude:>9.4f}{alt}')
+        print(f'  {place.name:<{width}}  {place.description}')
 
 
 async def cmd_save(args) -> None:
@@ -62,8 +67,15 @@ async def cmd_save(args) -> None:
         lat, lon, alt = (current.latitude, current.longitude,
                          current.altitude)
 
-    places.save(args.name, lat, lon, alt)
-    print(f'saved {args.name}: {lat:.4f}, {lon:.4f}')
+    saved_places = await places.save(args.name, lat, lon, alt,
+                                     lookup=not args.no_address)
+    place = next((p for p in saved_places
+                  if p.name == args.name.strip()), None)
+
+    if place is not None and place.address:
+        print(f'saved {args.name}: {place.address}')
+    else:
+        print(f'saved {args.name}: {lat:.4f}, {lon:.4f}')
 
 
 async def cmd_forget(args) -> None:
@@ -99,9 +111,10 @@ def main() -> int:
     p = sub.add_parser('list', parents=[common], help='saved places')
     p.set_defaults(fn=cmd_list)
 
-    p = sub.add_parser('here', parents=[common],
-                       help='where we are now')
-    p.set_defaults(fn=cmd_here)
+    for name in ('current', 'here'):
+        sp = sub.add_parser(name, parents=[common],
+                            help='where we are now')
+        sp.set_defaults(fn=cmd_here)
 
     p = sub.add_parser('show', parents=[common],
                        help='one place in detail')
@@ -116,6 +129,8 @@ def main() -> int:
     p.add_argument('--latitude', type=float)
     p.add_argument('--longitude', type=float)
     p.add_argument('--altitude', type=float)
+    p.add_argument('--no-address', action='store_true',
+                   help='skip the address lookup')
 
     p = sub.add_parser('forget', parents=[common],
                        help='remove a saved place')
