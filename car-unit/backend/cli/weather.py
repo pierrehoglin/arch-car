@@ -2,10 +2,12 @@
 """
 Weather.
 
-    weather                     # here, now and the next few hours
+    weather                     # now, the next day, then day by day
     weather home                # a saved place
-    weather now
-    weather hourly home --hours 24
+    weather now                 # just the current conditions
+    weather daily               # one row per day
+    weather hourly --hours 0    # every entry, about ten days
+    weather hourly home --hours 48
     weather --refresh           # ignore the cache
     weather providers
     weather waybar
@@ -87,15 +89,37 @@ def show_hourly(entries) -> None:
         print('no forecast data')
         return
 
+    previous = None
     for e in entries:
-        when = f'{e.time:%a %H:%M}' if e.time else '?'
+        # A date heading whenever the day changes, so a long list
+        # stays readable when scrolled.
+        if e.time is not None and e.time.date() != previous:
+            previous = e.time.date()
+            print(f'\n{e.time:%A %-d %B}')
+
+        when = f'{e.time:%H:%M}' if e.time else '?'
         temp = (f'{e.temperature:>5.1f}\u00b0'
                 if e.temperature is not None else '     ')
         wind = (f'{e.wind_speed:>4.1f} m/s {e.wind_compass:<2}'
                 if e.wind_speed is not None else '')
         rain = (f'{e.precipitation:>5.1f} mm'
                 if e.precipitation else '         ')
-        print(f'  {when:<12} {e.glyph}  {temp}  {rain}  {wind}')
+        span = f'{e.period_hours}h' if e.period_hours > 1 else '  '
+        print(f'  {when:<6} {span:<3} {e.glyph}  {temp}  {rain}  {wind}')
+
+
+def show_daily(days) -> None:
+    if not days:
+        print('no forecast data')
+        return
+
+    for d in days:
+        when = f'{d.date:%a %-d %b}' if d.date else '?'
+        high = f'{d.high:>5.1f}\u00b0' if d.high is not None else '      '
+        low = f'{d.low:>5.1f}\u00b0' if d.low is not None else '      '
+        rain = f'{d.precipitation:>5.1f} mm' if d.precipitation else ''
+        partial = '  (partial)' if d.entries < 4 else ''
+        print(f'  {when:<12} {d.glyph}  {high} {low}  {rain}{partial}')
 
 
 async def cmd_now(args) -> None:
@@ -111,22 +135,44 @@ async def cmd_now(args) -> None:
 
 async def cmd_hourly(args) -> None:
     forecast = await service.forecast(args.place, refresh=args.refresh)
-    entries = forecast.next_hours(args.hours)
+    # --hours 0 means everything the provider sent, which is about ten
+    # days and the right input for a scrollable list.
+    entries = (forecast.hourly if not args.hours
+               else forecast.next_hours(args.hours))
     if args.json:
         emit_json(entries)
         return
     show_hourly(entries)
+    if not args.json:
+        print(f'\n{len(entries)} entries', file=sys.stderr)
+
+
+async def cmd_daily(args) -> None:
+    forecast = await service.forecast(args.place, refresh=args.refresh)
+    days = forecast.daily(args.days)
+    if args.json:
+        emit_json(days)
+        return
+    show_daily(days)
 
 
 async def cmd_full(args) -> None:
+    """Everything: now, the next few hours, then day by day."""
     forecast = await service.forecast(args.place, refresh=args.refresh)
     if args.json:
         emit_json(forecast)
         return
+
     if forecast.current is not None:
         show_now(forecast.current, forecast)
-        print()
+
+    print()
     show_hourly(forecast.next_hours(args.hours))
+
+    days = forecast.daily()
+    if len(days) > 1:
+        print('\n\nDaily')
+        show_daily(days)
 
 
 async def cmd_providers(args) -> None:
@@ -186,19 +232,27 @@ def main() -> int:
         description=__doc__.strip(),
         parents=[common],
         formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--hours', type=int, default=12,
-                    help='how far ahead to show (default 12)')
+    ap.add_argument('--hours', type=int, default=24,
+                    help='hours to show; 0 for every entry')
     sub = ap.add_subparsers(dest='cmd')
 
     for name, fn, help_text in (
             ('now', cmd_now, 'current conditions'),
-            ('hourly', cmd_hourly, 'the next few hours'),
-            ('full', cmd_full, 'conditions and forecast'),
+            ('hourly', cmd_hourly,
+             'every forecast entry; --hours 0 for all of them'),
+            ('full', cmd_full, 'conditions, hours and days'),
             ('waybar', cmd_waybar, 'one JSON line for a status bar')):
         sp = sub.add_parser(name, parents=[common], help=help_text)
         sp.set_defaults(fn=fn)
         sp.add_argument('place', nargs='?', default=None)
-        sp.add_argument('--hours', type=int, default=12)
+        sp.add_argument('--hours', type=int, default=24)
+
+    p = sub.add_parser('daily', parents=[common],
+                       help='one row per day')
+    p.set_defaults(fn=cmd_daily)
+    p.add_argument('place', nargs='?', default=None)
+    p.add_argument('--days', type=int, default=0,
+                   help='how many days; 0 for all')
 
     p = sub.add_parser('providers', parents=[common],
                        help='what services are available')
@@ -217,7 +271,7 @@ def main() -> int:
 
     args = parse_args(ap, 'full', argv=argv,
                       defaults={'json': False, 'refresh': False,
-                                'hours': 12, 'place': None})
+                                'hours': 24, 'days': 0, 'place': None})
     return run(args.fn(args))
 
 

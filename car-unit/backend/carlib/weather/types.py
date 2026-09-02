@@ -12,7 +12,7 @@ keeps the original in `symbol` for anyone who wants it.
 """
 
 from enum import StrEnum
-from datetime import datetime
+from datetime import datetime, date as dt_date
 from dataclasses import dataclass, field, asdict
 
 
@@ -134,6 +134,67 @@ class Conditions:
         return '  '.join(bits)
 
 
+# How noteworthy each condition is, for picking one to represent a
+# whole day. A day with six hours of sun and one of thunder is a
+# thunder day: the exception is what you need to know about.
+CONDITION_SEVERITY = {
+    Condition.UNKNOWN: 0,
+    Condition.CLEAR: 1,
+    Condition.PARTLY_CLOUDY: 2,
+    Condition.CLOUDY: 3,
+    Condition.FOG: 4,
+    Condition.DRIZZLE: 5,
+    Condition.RAIN: 6,
+    Condition.SLEET: 7,
+    Condition.SNOW: 8,
+    Condition.THUNDER: 9,
+}
+
+
+@dataclass
+class Day:
+    """
+    One day, summarised from the hourly entries.
+
+    What a forecast list actually needs beyond the next few hours: a
+    high, a low, how much rain, and one icon.
+    """
+
+    date: dt_date | None = None
+    high: float | None = None
+    low: float | None = None
+    precipitation: float = 0.0
+    wind_max: float | None = None
+    condition: Condition = Condition.UNKNOWN
+    entries: int = 0
+
+    def to_dict(self) -> dict:
+        return {
+            'date': self.date.isoformat() if self.date else None,
+            'high': self.high,
+            'low': self.low,
+            'precipitation': self.precipitation,
+            'wind_max': self.wind_max,
+            'condition': str(self.condition),
+            'entries': self.entries,
+        }
+
+    @property
+    def glyph(self) -> str:
+        return CONDITION_GLYPHS.get(self.condition,
+                                    CONDITION_GLYPHS[Condition.UNKNOWN])
+
+    @property
+    def summary(self) -> str:
+        bits = []
+        if self.high is not None and self.low is not None:
+            bits.append(f'{self.high:.0f}\u00b0 / {self.low:.0f}\u00b0')
+        bits.append(str(self.condition).replace('-', ' '))
+        if self.precipitation:
+            bits.append(f'{self.precipitation:.1f} mm')
+        return '  '.join(bits)
+
+
 @dataclass
 class Forecast:
     """A provider's answer for one location."""
@@ -183,6 +244,56 @@ class Forecast:
                 continue
             best = entry
         return best
+
+    def daily(self, days: int = 0) -> list['Day']:
+        """
+        The hourly entries collapsed to one row per day.
+
+        Precipitation is weighted by each entry's period. MET sends
+        hourly blocks for the first couple of days and six-hourly
+        after that, so summing them naively would undercount the far
+        end of the forecast by a factor of six.
+
+        Partial days are included -- today usually starts mid-morning
+        -- with `entries` saying how much of the day is covered.
+        """
+        buckets: dict = {}
+
+        for entry in self.hourly:
+            if entry.time is None:
+                continue
+            key = entry.time.date()
+            day = buckets.get(key)
+            if day is None:
+                day = Day(date=key)
+                buckets[key] = day
+
+            day.entries += 1
+
+            if entry.temperature is not None:
+                if day.high is None or entry.temperature > day.high:
+                    day.high = entry.temperature
+                if day.low is None or entry.temperature < day.low:
+                    day.low = entry.temperature
+
+            if entry.wind_speed is not None:
+                if day.wind_max is None or entry.wind_speed > day.wind_max:
+                    day.wind_max = entry.wind_speed
+
+            if entry.precipitation:
+                # The amount already covers period_hours, so add it
+                # once rather than multiplying by the period.
+                day.precipitation += entry.precipitation
+
+            if (CONDITION_SEVERITY.get(entry.condition, 0)
+                    > CONDITION_SEVERITY.get(day.condition, 0)):
+                day.condition = entry.condition
+
+        ordered = [buckets[k] for k in sorted(buckets)]
+        for day in ordered:
+            day.precipitation = round(day.precipitation, 1)
+
+        return ordered[:days] if days else ordered
 
     def next_hours(self, hours: int = 12) -> list[Conditions]:
         if not self.hourly:

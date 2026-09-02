@@ -10,6 +10,8 @@ import sys
 import json
 import argparse
 import asyncio
+from enum import Enum
+from datetime import date, datetime
 from dataclasses import is_dataclass, asdict
 from typing import Any, Awaitable
 
@@ -68,13 +70,30 @@ CALL_GLYPH = {
 
 
 def to_jsonable(value: Any) -> Any:
-    """Dataclasses, lists of them, and plain data alike."""
+    """
+    Dataclasses, lists of them, and plain data alike.
+
+    A dataclass's own to_dict() wins over asdict(), because several of
+    them convert fields json cannot handle -- asdict() recurses into
+    nested dataclasses but leaves a datetime as a datetime, which then
+    fails at json.dumps with a message that says nothing about which
+    field.
+    """
     if is_dataclass(value) and not isinstance(value, type):
-        return asdict(value)
+        converter = getattr(value, 'to_dict', None)
+        if callable(converter):
+            return to_jsonable(converter())
+        return to_jsonable(asdict(value))
     if isinstance(value, (list, tuple)):
         return [to_jsonable(v) for v in value]
     if isinstance(value, dict):
         return {k: to_jsonable(v) for k, v in value.items()}
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, Enum):
+        return value.value
     return value
 
 
