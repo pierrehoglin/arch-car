@@ -278,6 +278,7 @@ class _Geocoding:
                       latitude: float | None = None,
                       longitude: float | None = None,
                       country: str | None = None,
+                      bias: bool | None = None,
                       **_ignored) -> list[Address]:
         params: dict = {'q': query, 'limit': limit}
         if latitude is not None:
@@ -286,6 +287,8 @@ class _Geocoding:
             params['lon'] = longitude
         if country is not None:
             params['country'] = country
+        if bias is not None:
+            params['bias'] = bias
         rows = await request('GET', '/geocode/suggest', query=params)
         return [from_dict(Address, r) for r in rows]
 

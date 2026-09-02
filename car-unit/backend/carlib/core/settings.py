@@ -371,6 +371,9 @@ CATALOGUE: tuple[Known, ...] = (
           'Photon server for type-ahead suggestions. The public one '
           'asks that usage stay reasonable; point this at your own '
           'instance for more.'),
+    Known('geocoding.bias', True, 'Rank suggestions near the current '
+          'position first. Off when searching somewhere you are not.',
+          'bool'),
     Known('geocoding.country', 'se', 'Restrict address searches to '
           'this ISO country code. Empty searches worldwide, which '
           'ranks by importance rather than distance.'),

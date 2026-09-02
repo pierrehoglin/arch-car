@@ -332,8 +332,16 @@ async def get_geocode_suggest(
         limit: int = 5,
         lat: float | None = None,
         lon: float | None = None,
-        country: str | None = None) -> list[dict]:
-    return await routes.geocode_suggest(q, limit, lat, lon, country)
+        country: str | None = None,
+        bias: bool | None = None) -> list[dict]:
+    """
+    Type-ahead suggestions.
+
+    `bias` omitted follows the geocoding.bias setting; true or false
+    overrides it for this request.
+    """
+    return await routes.geocode_suggest(q, limit, lat, lon, country,
+                                        bias)
 
 
 @app.get('/geocode/search')
@@ -362,11 +370,24 @@ async def get_places() -> list[dict]:
 
 @app.get('/places/current')
 async def get_places_current() -> dict | None:
+    """
+    Where we are, or null before the first fix.
+
+    A convenience alias -- /places/current also resolves through the
+    route below, which handles the reserved names itself. Declaring
+    it here only changes whether an unknown position is null or a 404.
+    """
     return await routes.places_current()
 
 
 @app.get('/places/{name}')
 async def get_place(name: str) -> dict:
+    """
+    One place by name.
+
+    "current" and "here" resolve to where we are, so this does not
+    depend on being declared after the literal route above.
+    """
     return await routes.places_resolve(name)
 
 

@@ -3,6 +3,7 @@
 Address search and lookup.
 
     geocode suggest "Kungsg"            # type-ahead, as you type
+    geocode suggest "Kungsg" --no-bias  # ignore where we are
     geocode search "Kungsgatan 12 Stockholm"
     geocode search "Ullevi" --limit 3
     geocode search "Berlin" --anywhere
@@ -134,8 +135,15 @@ async def cmd_suggest(args) -> None:
     outright, and Photon indexes the same data for exactly this.
     """
     country = '' if args.anywhere else args.country
+
+    bias = None
+    if args.no_bias:
+        bias = False
+    elif args.bias:
+        bias = True
+
     results = await geocoding.suggest(args.query, limit=args.limit,
-                                      country=country)
+                                      country=country, bias=bias)
 
     if args.json:
         emit_json(results)
@@ -249,6 +257,10 @@ def main() -> int:
     p.add_argument('--limit', type=int, default=5)
     p.add_argument('--country', default=None)
     p.add_argument('--anywhere', action='store_true')
+    p.add_argument('--bias', action='store_true',
+                   help='rank results near us first')
+    p.add_argument('--no-bias', action='store_true',
+                   help='ignore where we are; for somewhere far off')
 
     p = sub.add_parser('reverse', parents=[common],
                        help='the address at a point, or here')

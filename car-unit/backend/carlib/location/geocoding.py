@@ -77,6 +77,13 @@ PHOTON_MIN_INTERVAL = 1.0
 # useless, so it is not worth a request.
 MIN_SUGGEST_CHARS = 3
 
+# Bias suggestions towards where we are. On by default: "Kungsgatan"
+# exists in most Swedish towns and the one you want is the one you
+# are near. Off is right when searching somewhere you are not -- a
+# destination on the other side of the country would otherwise rank
+# below every local street of a similar name.
+DEFAULT_BIAS = True
+
 ATTRIBUTION = 'Data \u00a9 OpenStreetMap contributors (ODbL)'
 
 STATE = 'geocoding'
@@ -458,6 +465,11 @@ def photon_url() -> str:
                             DEFAULT_PHOTON_URL).rstrip('/')
 
 
+def default_bias() -> bool:
+    """Whether suggestions are biased towards the current position."""
+    return settings.get_bool('geocoding.bias', DEFAULT_BIAS)
+
+
 def parse_photon(feature: dict) -> Address:
     """
     One Photon GeoJSON feature.
@@ -511,14 +523,25 @@ def parse_photon(feature: dict) -> Address:
 async def suggest(query: str, limit: int = 5,
                   latitude: float | None = None,
                   longitude: float | None = None,
-                  country: str | None = None) -> list[Address]:
+                  country: str | None = None,
+                  bias: bool | None = None) -> list[Address]:
     """
     Type-ahead suggestions for a partial query.
 
-    Biased towards a position when one is given, which matters in a
-    car: "Kungsgatan" exists in most Swedish towns, and the one you
-    want is the one you are near. Falls back to the current position
-    so callers usually need not pass it.
+    Biased towards a position by default, which matters in a car:
+    "Kungsgatan" exists in most Swedish towns, and the one you want
+    is usually the one you are near. The position comes from the
+    argument, or from where we are.
+
+    Pass bias=False to search without it -- right when looking for
+    somewhere you are not, since a distant destination would
+    otherwise rank below every nearby street of a similar name.
+    bias=None follows the `geocoding.bias` setting.
+
+    Explicit coordinates override the setting -- passing a position
+    is itself a request to bias towards it -- but bias=False beats
+    both, since asking for no bias and getting one would be the wrong
+    way round.
 
     Short queries return nothing rather than making a request -- two
     characters match half the country and would waste a call on
@@ -534,10 +557,23 @@ async def suggest(query: str, limit: int = 5,
     if country is None:
         country = default_country()
 
-    if latitude is None or longitude is None:
-        position = current_position()
-        if position is not None:
-            latitude, longitude = position
+    explicit = latitude is not None and longitude is not None
+
+    # Three inputs, in order of how deliberate they are:
+    #
+    #   bias=False        an explicit no, and it wins outright
+    #   coordinates       passing a position is asking to bias to it
+    #   the setting       what to do when neither was said
+    #
+    if bias is False:
+        latitude = longitude = None
+    elif not explicit:
+        if bias or (bias is None and default_bias()):
+            position = current_position()
+            if position is not None:
+                latitude, longitude = position
+        else:
+            latitude = longitude = None
 
     params: dict = {
         'q': text,

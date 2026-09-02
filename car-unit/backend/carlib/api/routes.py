@@ -165,11 +165,13 @@ async def source_ta_skip() -> dict:
 async def geocode_suggest(query: str, limit: int = 5,
                           latitude: float | None = None,
                           longitude: float | None = None,
-                          country: str | None = None) -> list[dict]:
+                          country: str | None = None,
+                          bias: bool | None = None) -> list[dict]:
     rows = await geocoding.suggest(query, limit=limit,
                                    latitude=latitude,
                                    longitude=longitude,
-                                   country=country)
+                                   country=country,
+                                   bias=bias)
     return [r.to_dict() for r in rows]
 
 
