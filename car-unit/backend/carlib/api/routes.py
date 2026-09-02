@@ -9,6 +9,7 @@ sitting -- and lets everything here be tested directly.
 
 from typing import Any
 
+from carlib.core import settings
 from carlib.core.errors import (
     CarError,
     NotFoundError,
@@ -245,6 +246,56 @@ async def navigate_match(points: list[tuple[float, float]],
 
 async def navigate_status() -> dict:
     return await routing.status()
+
+
+# --- Settings ---------------------------------------------------------------
+
+async def settings_all() -> dict:
+    """Everything that has been set, as a nested object."""
+    return settings.reload()
+
+
+async def settings_catalogue() -> list[dict]:
+    """
+    Every setting that exists, whether or not it has been set.
+
+    What a settings screen needs: the key, its type, what it defaults
+    to, and a line describing it -- so the UI does not have to carry
+    its own copy of any of that.
+    """
+    sentinel = object()
+    rows = []
+
+    for entry in settings.catalogue():
+        value = settings.get(entry.key, sentinel)
+        rows.append({
+            'key': entry.key,
+            'kind': entry.kind,
+            'default': entry.default,
+            'description': entry.description,
+            'value': None if value is sentinel else value,
+            'set': value is not sentinel,
+        })
+
+    return rows
+
+
+async def settings_update(values: dict) -> dict:
+    """
+    Set several keys at once.
+
+    One write for the whole change, so a screen toggling two things
+    together cannot leave half of it on disk.
+    """
+    if values:
+        settings.update(values)
+    return settings.reload()
+
+
+async def settings_delete(key: str) -> dict:
+    """Remove a key, returning it to its default."""
+    settings.delete(key)
+    return settings.reload()
 
 
 # --- Health ----------------------------------------------------------------

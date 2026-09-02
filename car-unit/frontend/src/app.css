@@ -1,0 +1,136 @@
+/* Saira Semi Condensed for display, Barlow for body -- the two
+   families the design already uses. Served from Google Fonts for
+   now; worth self-hosting before this runs in a car, since a
+   dashboard should not wait on a CDN to render its own labels. */
+@import url('https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Saira+Semi+Condensed:wght@500;600;700&display=swap');
+
+:root {
+  --accent: #d8b146;
+  color-scheme: dark;
+
+  /* Type + shape (theme-independent) */
+  --font-display: 'Saira Semi Condensed', system-ui, sans-serif;
+  --font-body: 'Barlow', system-ui, -apple-system, sans-serif;
+  --radius: 20px;
+  --radius-sm: 12px;
+
+  /* Opacity applied to secondary/non-critical chrome; only overridden to a
+     low value under Night Panel so primary readouts (e.g. the DriveView
+     speed digit) stay legible while everything else recedes. */
+  --dim-secondary: 1;
+
+  /* A translucent tint of the *current* accent (whatever App.svelte just
+     resolved via accentFor() and set inline) — derived live via color-mix()
+     instead of a per-theme constant, so it always matches the actual accent
+     in use, not just the theme's default. Used for active-tab/nav
+     backgrounds and similar "soft" accent fills. */
+  --accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+/* Night / DARK — the primary SAAB "9-5" theme. */
+[data-theme='night'] {
+  --bg: #0b0e0f;
+  --bar: #0b0e0f;
+  --rail: #0b0e0f;
+  --surface: #14181a; /* cards / panels */
+  --panel-2: #1b2124; /* nested insets */
+  --chip: #1b2124;
+  --border: rgba(233, 237, 236, 0.09);
+  --hairline: rgba(233, 237, 236, 0.09);
+  --text: #e9edec;
+  --text-dim: rgba(233, 237, 236, 0.5);
+  --text-faint: rgba(233, 237, 236, 0.32);
+  --accent: #d8b146;
+  --accent-ink: #161200; /* text/icons on the accent fill */
+  --amber: #e6b45a;
+  --blue: #5aa9e6;
+  --pink: #e05c8a;
+  --danger: #ff8a80;
+  --knob: #ffffff;
+}
+
+/* Day / LIGHT — a warm Nordic light variant. */
+[data-theme='day'] {
+  --bg: #dfe2dd;
+  --bar: #e7eae4;
+  --rail: #e7eae4;
+  --surface: #f7f8f5;
+  --panel-2: #e7eae4;
+  --chip: #e7eae4;
+  --border: rgba(20, 24, 26, 0.1);
+  --hairline: rgba(20, 24, 26, 0.1);
+  --text: #14181a;
+  --text-dim: rgba(20, 24, 26, 0.55);
+  --text-faint: rgba(20, 24, 26, 0.38);
+  --accent: #1d4e91;
+  --accent-ink: #ffffff;
+  --amber: #c07d1f;
+  --blue: #2f7fc0;
+  --pink: #c23e6e;
+  --danger: #c0392b;
+  --knob: #ffffff;
+}
+
+/* Night Panel — a calmer, near-monochrome instrument mode for driving in the
+   dark. Applied as a synthetic third `data-theme` value (see App.svelte)
+   rather than a uniform filter, so secondary chrome can dim selectively
+   while primary readouts stay at full brightness. Accent is intentionally
+   left unset here: App.svelte always applies the user's chosen `ambient`
+   color as an inline `--accent` override, which wins regardless of theme. */
+[data-theme='nightpanel'] {
+  --bg: #000000;
+  --bar: #000000;
+  --rail: #000000;
+  --surface: #050706;
+  --panel-2: #070a09;
+  --chip: #070a09;
+  --border: rgba(255, 255, 255, 0.05);
+  --hairline: rgba(255, 255, 255, 0.05);
+  --text: #8a7f5f;
+  --text-dim: rgba(138, 127, 95, 0.5);
+  --text-faint: rgba(138, 127, 95, 0.32);
+  --accent-ink: #161200;
+  --amber: #3a3120;
+  --blue: #3a3120;
+  --pink: #3a3120;
+  --danger: #ff8a80;
+  --knob: #ffffff;
+  --dim-secondary: 0.12;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  font-family: var(--font-body);
+  background: var(--bg);
+  color: var(--text);
+  user-select: none;
+}
+
+button {
+  cursor: pointer;
+  font-family: inherit;
+  color: inherit;
+}
+
+/* Uppercase Saira labels used throughout the SAAB UI. */
+.eyebrow {
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+#app {
+  height: 100%;
+}

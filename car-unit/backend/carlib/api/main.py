@@ -210,6 +210,18 @@ class SelectBody(BaseModel):
     name: str
 
 
+class SettingsBody(BaseModel):
+    """
+    Dotted keys to values, e.g. {"ui.theme": "night"}.
+
+    Deliberately free-form: the catalogue documents what exists, but
+    an undeclared key still works, and the API should not be the thing
+    that stops it.
+    """
+
+    values: dict
+
+
 class Point(BaseModel):
     lat: float
     lon: float
@@ -418,6 +430,28 @@ async def post_place(body: PlaceBody) -> list[dict]:
 @api.delete('/places/{name}')
 async def delete_place(name: str) -> list[dict]:
     return await routes.places_remove(name)
+
+
+# --- Settings ---------------------------------------------------------------
+
+@api.get('/settings')
+async def get_settings() -> dict:
+    return await routes.settings_all()
+
+
+@api.get('/settings/catalogue')
+async def get_settings_catalogue() -> list[dict]:
+    return await routes.settings_catalogue()
+
+
+@api.put('/settings')
+async def put_settings(body: SettingsBody) -> dict:
+    return await routes.settings_update(body.values)
+
+
+@api.delete('/settings/{key}')
+async def delete_setting(key: str) -> dict:
+    return await routes.settings_delete(key)
 
 
 # --- Navigation -------------------------------------------------------------

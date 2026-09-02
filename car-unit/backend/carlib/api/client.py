@@ -378,8 +378,25 @@ class _Routing:
         return await request('GET', '/navigate/status')
 
 
+class _Settings:
+    """Mirrors carlib.core.settings over HTTP."""
+
+    async def all(self) -> dict:
+        return await request('GET', '/settings')
+
+    async def catalogue(self) -> list[dict]:
+        return await request('GET', '/settings/catalogue')
+
+    async def update(self, values: dict) -> dict:
+        return await request('PUT', '/settings', {'values': values})
+
+    async def delete(self, key: str) -> dict:
+        return await request('DELETE', f'/settings/{key}')
+
+
 fm = _Fm()
 source = _Source()
 geocoding = _Geocoding()
 places = _Places()
 routing = _Routing()
+settings = _Settings()
