@@ -347,6 +347,9 @@ CATALOGUE: tuple[Known, ...] = (
           'See `weather providers`.'),
     Known('weather.contact', '', 'Overrides `contact` for weather '
           'services only.'),
+    Known('weather.openweather.key', '', 'OpenWeather API key, from '
+          'home.openweathermap.org/api_keys. Needed only if '
+          'weather.provider is openweather.'),
     Known('places', [], 'Named locations, shared by anything that '
           'needs one. Managed by `places save` and `places forget`.',
           'list'),

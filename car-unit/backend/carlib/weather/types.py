@@ -67,11 +67,20 @@ class Conditions:
     temperature: float | None = None        # C
     feels_like: float | None = None         # C
 
-    # The forecast's own uncertainty, from the 10th and 90th
-    # percentiles. A wide spread means the models disagree, which is
-    # worth showing rather than presenting one number confidently.
-    temperature_min: float | None = None    # C
-    temperature_max: float | None = None    # C
+    # The forecast's own uncertainty for this moment, from the 10th
+    # and 90th percentiles. A wide spread means the models disagree.
+    #
+    # Not the same thing as a high and a low over a period -- those
+    # are temperature_high/low below. Conflating them made daily()
+    # widen a day's range by the hourly uncertainty.
+    temperature_p10: float | None = None    # C
+    temperature_p90: float | None = None    # C
+
+    # Actual extremes over the period, for entries that cover one --
+    # a provider's own daily summary. None for an instantaneous
+    # reading.
+    temperature_high: float | None = None   # C
+    temperature_low: float | None = None    # C
     humidity: float | None = None           # %
     pressure: float | None = None           # hPa
     dew_point: float | None = None          # C
@@ -79,8 +88,8 @@ class Conditions:
     wind_speed: float | None = None         # m/s
     wind_gust: float | None = None          # m/s
     wind_direction: float | None = None     # degrees, meteorological
-    wind_speed_min: float | None = None     # m/s
-    wind_speed_max: float | None = None     # m/s
+    wind_speed_p10: float | None = None     # m/s
+    wind_speed_p90: float | None = None     # m/s
 
     cloud_cover: float | None = None        # %
     cloud_low: float | None = None          # %
@@ -88,6 +97,9 @@ class Conditions:
     cloud_high: float | None = None         # %
     fog: float | None = None                # %
     uv_index: float | None = None
+    # Reported by OpenWeather, not by MET. Providers differ in what
+    # they supply, which is why every field is optional.
+    visibility: float | None = None         # metres
 
     precipitation: float | None = None      # mm over the period
     precipitation_min: float | None = None  # mm, low estimate
@@ -119,15 +131,15 @@ class Conditions:
 
         None when the provider gives no percentiles.
         """
-        if self.temperature_min is None or self.temperature_max is None:
+        if self.temperature_p10 is None or self.temperature_p90 is None:
             return None
-        return round(self.temperature_max - self.temperature_min, 1)
+        return round(self.temperature_p90 - self.temperature_p10, 1)
 
     @property
     def wind_spread(self) -> float | None:
-        if self.wind_speed_min is None or self.wind_speed_max is None:
+        if self.wind_speed_p10 is None or self.wind_speed_p90 is None:
             return None
-        return round(self.wind_speed_max - self.wind_speed_min, 1)
+        return round(self.wind_speed_p90 - self.wind_speed_p10, 1)
 
     @property
     def wind_arrow(self) -> str:
@@ -301,11 +313,27 @@ class Forecast:
 
             day.entries += 1
 
-            if entry.temperature is not None:
-                if day.high is None or entry.temperature > day.high:
-                    day.high = entry.temperature
-                if day.low is None or entry.temperature < day.low:
-                    day.low = entry.temperature
+            # An entry covering a period may carry its own extremes --
+            # a provider's daily summary does. Use those; otherwise
+            # the instantaneous temperature is both the high and the
+            # low for that moment.
+            #
+            # Deliberately not the percentiles: those describe how
+            # uncertain one reading is, and folding them in here would
+            # widen every day by the forecast error.
+            high = (entry.temperature_high
+                    if entry.temperature_high is not None
+                    else entry.temperature)
+            low = (entry.temperature_low
+                   if entry.temperature_low is not None
+                   else entry.temperature)
+
+            if high is not None:
+                if day.high is None or high > day.high:
+                    day.high = high
+            if low is not None:
+                if day.low is None or low < day.low:
+                    day.low = low
 
             if entry.wind_speed is not None:
                 if day.wind_max is None or entry.wind_speed > day.wind_max:

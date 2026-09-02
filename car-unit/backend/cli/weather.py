@@ -55,7 +55,7 @@ def show_now(conditions, forecast) -> None:
     spread = c.temperature_spread
     if spread is not None and spread >= TEMPERATURE_SPREAD:
         print(f'  temperature: {c.temperature:.1f}\u00b0C  '
-              f'({c.temperature_min:.0f} to {c.temperature_max:.0f})')
+              f'({c.temperature_p10:.0f} to {c.temperature_p90:.0f})')
 
     if c.feels_like is not None:
         print(f'  feels like:  {c.feels_like:.0f}\u00b0C')
@@ -71,7 +71,7 @@ def show_now(conditions, forecast) -> None:
         wind_spread = c.wind_spread
         if wind_spread is not None and wind_spread >= WIND_SPREAD:
             print(f'               forecast range '
-                  f'{c.wind_speed_min:.0f}-{c.wind_speed_max:.0f} m/s')
+                  f'{c.wind_speed_p10:.0f}-{c.wind_speed_p90:.0f} m/s')
     if c.cloud_cover is not None:
         layers = ''
         if c.cloud_low is not None:
@@ -88,6 +88,11 @@ def show_now(conditions, forecast) -> None:
                 if c.precipitation_probability is not None else '')
         print(f'  rain:        {c.precipitation:.1f} mm '
               f'over {c.period_hours}h{prob}')
+    if c.visibility is not None:
+        if c.visibility >= 10000:
+            print('  visibility:  10 km or more')
+        else:
+            print(f'  visibility:  {c.visibility / 1000:.1f} km')
     if c.uv_index is not None:
         print(f'  uv:          {c.uv_index:.1f}')
     if c.thunder_probability:

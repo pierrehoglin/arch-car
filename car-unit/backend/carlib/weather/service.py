@@ -21,7 +21,8 @@ from carlib.weather.types import Conditions, Forecast
 
 # Registering the built-in providers. Adding one means importing it
 # here; removing one means deleting the import and the module.
-from carlib.weather import metno        # noqa: F401
+from carlib.weather import metno         # noqa: F401
+from carlib.weather import openweather   # noqa: F401
 
 STATE = 'weather'
 
