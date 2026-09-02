@@ -203,6 +203,16 @@ class SelectBody(BaseModel):
     name: str
 
 
+class Point(BaseModel):
+    lat: float
+    lon: float
+
+
+class RouteBody(BaseModel):
+    points: list[Point]
+    costing: str | None = None
+
+
 class PlaceBody(BaseModel):
     name: str
     latitude: float | None = None
@@ -401,3 +411,24 @@ async def post_place(body: PlaceBody) -> list[dict]:
 @app.delete('/places/{name}')
 async def delete_place(name: str) -> list[dict]:
     return await routes.places_remove(name)
+
+
+# --- Navigation -------------------------------------------------------------
+
+@app.post('/navigate/route')
+async def post_navigate_route(body: RouteBody) -> dict:
+    """A route through two or more points."""
+    return await routes.navigate_route(
+        [(p.lat, p.lon) for p in body.points], body.costing)
+
+
+@app.post('/navigate/match')
+async def post_navigate_match(body: RouteBody) -> dict:
+    """Snap a GPS trace onto the road network."""
+    return await routes.navigate_match(
+        [(p.lat, p.lon) for p in body.points], body.costing)
+
+
+@app.get('/navigate/status')
+async def get_navigate_status() -> dict:
+    return await routes.navigate_status()

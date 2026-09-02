@@ -17,6 +17,7 @@ from carlib.core.errors import (
     TransferError,
 )
 from carlib.location import geocoding, places
+from carlib.navigation import routing
 from carlib.radio import fm
 from carlib.system import source
 
@@ -228,6 +229,22 @@ async def places_remove(name: str) -> list[dict]:
 
 async def places_resolve(name: str | None = None) -> dict:
     return (await places.resolve(name)).to_dict()
+
+
+async def navigate_route(points: list[tuple[float, float]],
+                         costing: str | None = None) -> dict:
+    result = await routing.route(points, costing=costing)
+    return result.to_dict()
+
+
+async def navigate_match(points: list[tuple[float, float]],
+                         costing: str | None = None) -> dict:
+    result = await routing.match(points, costing=costing)
+    return result.to_dict()
+
+
+async def navigate_status() -> dict:
+    return await routing.status()
 
 
 # --- Health ----------------------------------------------------------------

@@ -41,6 +41,7 @@ from carlib.system.source import (
 )
 from carlib.location.geocoding import Address
 from carlib.location.places import Place, CURRENT
+from carlib.navigation.types import Route
 
 # Any host is accepted for a Unix socket; httpx requires one.
 BASE_URL = 'http://carlib'
@@ -350,7 +351,31 @@ class _Places:
         return [from_dict(Place, r) for r in rows]
 
 
+class _Routing:
+    """Mirrors carlib.navigation.routing over HTTP."""
+
+    async def route(self, points, costing: str | None = None,
+                    **_ignored) -> Route:
+        row = await request('POST', '/navigate/route', {
+            'points': [{'lat': p[0], 'lon': p[1]} for p in points],
+            'costing': costing,
+        })
+        return from_dict(Route, row)
+
+    async def match(self, points, costing: str | None = None,
+                    **_ignored) -> Route:
+        row = await request('POST', '/navigate/match', {
+            'points': [{'lat': p[0], 'lon': p[1]} for p in points],
+            'costing': costing,
+        })
+        return from_dict(Route, row)
+
+    async def status(self) -> dict:
+        return await request('GET', '/navigate/status')
+
+
 fm = _Fm()
 source = _Source()
 geocoding = _Geocoding()
 places = _Places()
+routing = _Routing()

@@ -350,6 +350,17 @@ CATALOGUE: tuple[Known, ...] = (
     Known('weather.openweather.key', '', 'OpenWeather API key, from '
           'home.openweathermap.org/api_keys. Needed only if '
           'weather.provider is openweather.'),
+    Known('navigation.url', 'https://valhalla1.openstreetmap.de',
+          'Valhalla router. The public one allows one call per '
+          'second; a local instance reroutes without signal.'),
+    Known('navigation.costing', 'auto', 'How to route: auto, bicycle, '
+          'pedestrian, motorcycle, bus, truck or taxi.'),
+    Known('navigation.off_route_metres', 50.0, 'How far off the line '
+          'counts as having left the route.', 'float'),
+    Known('navigation.off_route_fixes', 3, 'Consecutive fixes off the '
+          'line before rerouting. Stops one bad fix triggering it.',
+          'int'),
+
     Known('places', [], 'Named locations, shared by anything that '
           'needs one. Managed by `places save` and `places forget`.',
           'list'),
