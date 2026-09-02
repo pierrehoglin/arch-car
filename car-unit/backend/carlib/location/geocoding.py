@@ -33,6 +33,11 @@ lookups -- a distance gate so a parked car issues no requests at all.
 Set `contact` so the User-Agent identifies you:
 
     settings set contact you@example.com
+
+Searches are restricted to one country -- Sweden by default -- since
+a car asks about places it can drive to:
+
+    settings set geocoding.country se
 """
 
 import math
@@ -85,6 +90,12 @@ DEFAULT_MIN_MOVE_METRES = 50.0
 # fresh request every few houses.
 CACHE_PRECISION = 3
 CACHE_LIMIT = 200
+
+# Searches are limited to this country by default. A car unit asks
+# about places it can drive to, and an unrestricted search puts
+# Stockholm, Wisconsin above Stockholm, Sweden. Clear the setting to
+# search everywhere.
+DEFAULT_COUNTRY = 'se'
 
 _last_request = 0.0
 _lock = asyncio.Lock()
@@ -356,17 +367,34 @@ async def _get(url: str, params: dict,
             'Nominatim response was not JSON') from exc
 
 
+def default_country() -> str:
+    """
+    Country to restrict searches to, as an ISO 3166-1 alpha-2 code.
+
+    Set `geocoding.country` to change it, or to an empty string to
+    search worldwide.
+    """
+    return settings.get_str('geocoding.country', DEFAULT_COUNTRY)
+
+
 async def search(query: str, limit: int = 5,
-                 country: str = '') -> list[Address]:
+                 country: str | None = None) -> list[Address]:
     """
     Find places matching a name or address.
 
     User-triggered, which the policy explicitly permits: looking up a
     navigation target or somewhere to check the weather.
+
+    Restricted to one country by default, because an unrestricted
+    search ranks by importance rather than by distance -- "Stockholm"
+    can return Wisconsin. Pass country='' to search everywhere.
     """
     text = str(query).strip()
     if not text:
         raise NotFoundError('place', query, [])
+
+    if country is None:
+        country = default_country()
 
     params = {
         'q': text,
@@ -375,7 +403,7 @@ async def search(query: str, limit: int = 5,
         'addressdetails': 1,
     }
     if country:
-        params['countrycodes'] = country.lower()
+        params['countrycodes'] = country.strip().lower()
 
     payload = await _get(SEARCH_URL, params)
     if not isinstance(payload, list):

@@ -3,7 +3,8 @@
 Address search and lookup.
 
     geocode search "Kungsgatan 12 Stockholm"
-    geocode search "Ullevi" --country se --limit 3
+    geocode search "Ullevi" --limit 3
+    geocode search "Berlin" --anywhere
     geocode reverse                     # where we are now
     geocode reverse 59.3293 18.0686
     geocode here                        # our address, from the cache
@@ -25,6 +26,10 @@ Anything run at regular intervals is held to four requests a minute.
 Set your contact so requests can be attributed:
 
     settings set contact you@example.com
+
+Searches are limited to one country, Sweden by default:
+
+    settings set geocoding.country se
 
 Automatic address updates while driving are gated on distance moved
 rather than time, so a parked car makes no requests. Adjust with:
@@ -72,8 +77,17 @@ def attribution() -> None:
 
 
 async def cmd_search(args) -> None:
+    # Resolve the country here rather than leaving it None, so the
+    # empty-result hint can say where it actually looked.
+    if args.anywhere:
+        country = ''
+    elif args.country is not None:
+        country = args.country
+    else:
+        country = geocoding.default_country()
+
     results = await geocoding.search(args.query, limit=args.limit,
-                                     country=args.country)
+                                     country=country)
 
     if args.json:
         emit_json(results)
@@ -81,8 +95,12 @@ async def cmd_search(args) -> None:
 
     if not results:
         print('nothing found')
-        print('try adding a town or country, or --country se',
-              file=sys.stderr)
+        if country:
+            print(f'searched {country.upper()} only -- try --anywhere, '
+                  f'or --country XX', file=sys.stderr)
+        else:
+            print('searched worldwide; try a more specific query',
+                  file=sys.stderr)
         return
 
     show_list(results)
@@ -174,8 +192,12 @@ def main() -> int:
     p.set_defaults(fn=cmd_search)
     p.add_argument('query')
     p.add_argument('--limit', type=int, default=5)
-    p.add_argument('--country', default='',
-                   help='restrict to a country code, e.g. se')
+    p.add_argument('--country', default=None,
+                   help='restrict to a country code; defaults to the '
+                        'geocoding.country setting')
+    p.add_argument('--anywhere', action='store_true',
+                   help='search worldwide, ignoring the country '
+                        'setting')
     p.add_argument('--save', default='',
                    help='save the first result as a named place')
 

@@ -367,6 +367,9 @@ CATALOGUE: tuple[Known, ...] = (
     Known('geocoding.move_metres', 1000.0, 'How far to move before '
           'looking up the address again. Lower is fine -- the 4 per '
           'minute ceiling is enforced separately.', 'float'),
+    Known('geocoding.country', 'se', 'Restrict address searches to '
+          'this ISO country code. Empty searches worldwide, which '
+          'ranks by importance rather than distance.'),
     Known('geocoding.min_move_metres', 50.0, 'Shortest move that can '
           'trigger a lookup once the address has gone stale.',
           'float'),
