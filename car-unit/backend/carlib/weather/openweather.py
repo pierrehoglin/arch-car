@@ -1,26 +1,34 @@
 """
-OpenWeather One Call 3.0.
+OpenWeather One Call 4.0.
 
-    https://openweathermap.org/api/one-call-3
+    https://openweathermap.org/api/one-call-4
 
-Hourly for 48 hours, then daily for 8 days, plus current conditions.
-UV index, dew point and per-period precipitation probability come with
-it, which the older 5-day endpoint does not carry.
+Modular, unlike 3.0: current conditions, hourly and daily each come
+from their own endpoint, so one Forecast costs three calls.
 
-Requires an API key AND an active One Call subscription. The free tier
-is 1,000 calls a day, but OpenWeather ask for card details even for
-that -- worth setting a daily cap in their billing page so it can
-never be exceeded.
+The response limits shape that choice. The 1h timeline returns at most
+20 records and 1day at most 10, with further pages costing an extra
+call each. Three calls give 20 hours of hourly detail and 10 days of
+daily -- more than anything here displays, and roughly 144 calls a day
+against the 1,000 free once the cache is doing its job.
+
+Requires a "One Call by Call" subscription. A 3.0 subscription does
+not cover 4.0; they are separate, and the key returns 401 until you
+subscribe.
 
     settings set weather.openweather.key YOUR_KEY
 
-The daily entries are appended to the hourly list with a 24 hour
-period rather than kept separately. Everything above the provider
-reads Forecast.hourly and groups it with daily(), so a forecast that
-gets coarser further out is already the normal shape -- MET moves from
-1 to 6 hour steps the same way.
+Entry fields are unchanged from 3.0 -- temp, feels_like, dew_point,
+uvi, wind_gust, pop, rain.1h -- so only the envelope differs. Every
+endpoint wraps its records in a `data` array.
+
+Daily entries are appended to the hourly list with a 24 hour period
+rather than kept separately. Everything above the provider reads
+Forecast.hourly and groups it with daily(), so a forecast that gets
+coarser further out is already the normal shape.
 """
 
+import asyncio
 from datetime import datetime, timezone
 
 from carlib.core import settings
@@ -28,7 +36,11 @@ from carlib.core.errors import NotAvailableError
 from carlib.weather.base import Provider, register
 from carlib.weather.types import Condition, Conditions, Forecast
 
-BASE_URL = 'https://api.openweathermap.org/data/3.0/onecall'
+BASE = 'https://api.openweathermap.org/data/4.0/onecall'
+
+CURRENT_URL = f'{BASE}/current'
+HOURLY_URL = f'{BASE}/timeline/1h'
+DAILY_URL = f'{BASE}/timeline/1day'
 
 # One Call gives instantaneous current conditions, hourly steps, and
 # daily summaries.
@@ -36,10 +48,8 @@ CURRENT_HOURS = 0
 HOURLY_HOURS = 1
 DAILY_HOURS = 24
 
-# Blocks we do not use. minutely is 60 minutes of precipitation
-# intensity with no equivalent in other providers; alerts are free
-# text. Excluding them keeps the response smaller.
-EXCLUDE = 'minutely,alerts'
+# Endpoints we do not call. 1min and 15min are finer than anything
+# here shows, and alerts need a second request per alert id.
 
 
 # Condition codes, grouped by leading digit.
@@ -193,8 +203,8 @@ def parse_day(entry: dict) -> Conditions:
 @register
 class OpenWeatherProvider(Provider):
     name = 'openweather'
-    description = ('OpenWeather 5 day / 3 hour -- needs a free API '
-                   'key, no card')
+    description = ('OpenWeather One Call 4.0 -- 20h hourly, 10 day '
+                   'daily; needs a One Call by Call subscription')
     global_coverage = True
 
     def api_key(self) -> str:
@@ -215,52 +225,75 @@ class OpenWeatherProvider(Provider):
             # Celsius and m/s, matching the shared model. Without this
             # temperatures come back in Kelvin.
             'units': 'metric',
-            'exclude': EXCLUDE,
         }
 
-        body, headers = await self._get_json(BASE_URL, params=params)
-        return self.parse(body, headers, latitude, longitude, altitude)
+        # Three endpoints, fetched together. Sequentially this would
+        # be three round trips on a link that may be cellular.
+        current, hourly, daily = await asyncio.gather(
+            self._get_json(CURRENT_URL, params=params),
+            self._get_json(HOURLY_URL, params=params),
+            self._get_json(DAILY_URL, params=params),
+            return_exceptions=True,
+        )
 
-    def parse(self, body: dict, headers: dict,
+        # The current endpoint is the only one worth failing over:
+        # without the timelines there is still something to show, but
+        # a forecast with no conditions at all is not useful.
+        if isinstance(current, BaseException):
+            raise current
+
+        return self.parse(
+            current[0],
+            hourly[0] if not isinstance(hourly, BaseException) else {},
+            daily[0] if not isinstance(daily, BaseException) else {},
+            latitude, longitude, altitude)
+
+    def parse(self, current: dict, hourly: dict, daily: dict,
               latitude: float, longitude: float,
               altitude: float | None = None) -> Forecast:
         """
-        Turn a One Call response into a Forecast.
+        Combine the three responses into one Forecast.
 
         Separate from fetch so it can be tested without the network.
+        Every 4.0 endpoint wraps its records in a `data` array, so the
+        shape is the same for all three.
         """
-        current = body.get('current')
-        hourly = body.get('hourly') or []
-        daily = body.get('daily') or []
+        current_rows = current.get('data') or []
+        hourly_rows = hourly.get('data') or []
+        daily_rows = daily.get('data') or []
 
-        if not current and not hourly and not daily:
-            message = body.get('message') or 'no forecast in the response'
+        if not current_rows and not hourly_rows and not daily_rows:
+            message = (current.get('message') or hourly.get('message')
+                       or daily.get('message')
+                       or 'no forecast in the response')
             raise NotAvailableError(f'{self.name}: {message}')
 
-        entries = [parse_point(e) for e in hourly]
+        entries = [parse_point(row) for row in hourly_rows]
 
-        # Daily entries extend the list past the 48 hour hourly limit.
-        # Anything already covered by an hourly entry is skipped, so
-        # the two do not overlap on the first two days.
+        # Daily records extend the list past the hourly window.
+        # Anything already covered is skipped so the two do not
+        # overlap on the first day.
         last_hour = entries[-1].time if entries else None
-        for raw in daily:
-            day = parse_day(raw)
+        for row in daily_rows:
+            day = parse_day(row)
             if (last_hour is not None and day.time is not None
                     and day.time <= last_hour):
                 continue
             entries.append(day)
 
+        now = (parse_point(current_rows[0], CURRENT_HOURS)
+               if current_rows else (entries[0] if entries else None))
+
         return Forecast(
             provider=self.name,
-            latitude=float(body.get('lat', latitude)),
-            longitude=float(body.get('lon', longitude)),
+            latitude=float(current.get('lat', latitude)),
+            longitude=float(current.get('lon', longitude)),
             altitude=altitude,
-            updated=_time((current or {}).get('dt'))
-            or datetime.now(timezone.utc),
+            updated=(now.time if now is not None
+                     else datetime.now(timezone.utc)),
             # No useful Expires header, so the service falls back to
-            # its own TTL. OpenWeather update roughly every 10 minutes.
+            # its own TTL. OpenWeather update every 10 minutes.
             expires=None,
-            current=(parse_point(current, CURRENT_HOURS)
-                     if current else (entries[0] if entries else None)),
+            current=now,
             hourly=entries,
         )
