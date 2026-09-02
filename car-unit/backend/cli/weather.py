@@ -6,7 +6,7 @@ Weather.
     weather home                # a saved place
     weather now                 # just the current conditions
     weather daily               # one row per day
-    weather hourly --hours 0    # every entry, about ten days
+    weather hourly              # every entry, about ten days
     weather hourly home --hours 48
     weather --refresh           # ignore the cache
     weather providers
@@ -56,7 +56,16 @@ def show_now(conditions, forecast) -> None:
         print(f'  wind:        {c.wind_speed:.1f} m/s '
               f'{c.wind_compass} {c.wind_arrow}{gust}')
     if c.cloud_cover is not None:
-        print(f'  cloud:       {c.cloud_cover:.0f}%')
+        layers = ''
+        if c.cloud_low is not None:
+            layers = (f'  (low {c.cloud_low:.0f} / '
+                      f'mid {c.cloud_medium or 0:.0f} / '
+                      f'high {c.cloud_high or 0:.0f})')
+        print(f'  cloud:       {c.cloud_cover:.0f}%{layers}')
+    if c.fog:
+        print(f'  fog:         {c.fog:.0f}%')
+    if c.dew_point is not None:
+        print(f'  dew point:   {c.dew_point:.1f}\u00b0C')
     if c.precipitation is not None:
         prob = (f'  ({c.precipitation_probability:.0f}% chance)'
                 if c.precipitation_probability is not None else '')
@@ -64,6 +73,8 @@ def show_now(conditions, forecast) -> None:
               f'over {c.period_hours}h{prob}')
     if c.uv_index is not None:
         print(f'  uv:          {c.uv_index:.1f}')
+    if c.thunder_probability:
+        print(f'  thunder:     {c.thunder_probability:.0f}% chance')
 
     print()
     where = '  '
@@ -135,10 +146,10 @@ async def cmd_now(args) -> None:
 
 async def cmd_hourly(args) -> None:
     forecast = await service.forecast(args.place, refresh=args.refresh)
-    # --hours 0 means everything the provider sent, which is about ten
-    # days and the right input for a scrollable list.
-    entries = (forecast.hourly if not args.hours
-               else forecast.next_hours(args.hours))
+    # Everything by default -- about ten days, which is what a
+    # scrollable list wants. --hours trims it.
+    entries = (forecast.next_hours(args.hours) if args.hours
+               else forecast.hourly)
     if args.json:
         emit_json(entries)
         return
@@ -245,7 +256,9 @@ def main() -> int:
         sp = sub.add_parser(name, parents=[common], help=help_text)
         sp.set_defaults(fn=fn)
         sp.add_argument('place', nargs='?', default=None)
-        sp.add_argument('--hours', type=int, default=24)
+        # hourly defaults to everything; the others to a day.
+        sp.add_argument('--hours', type=int,
+                        default=0 if name == 'hourly' else 24)
 
     p = sub.add_parser('daily', parents=[common],
                        help='one row per day')

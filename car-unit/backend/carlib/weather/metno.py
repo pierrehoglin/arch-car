@@ -4,6 +4,13 @@ MET Norway Locationforecast 2.0.
 Free, no API key, worldwide with most detail for Scandinavia. Data is
 Creative Commons licensed including commercial use.
 
+Uses the `complete` endpoint. `compact` omits wind gust, dew point,
+UV, fog and cloud layers, which are worth the larger response.
+
+`complete` reports apparent_air_temperature. MET's own FAQ predates
+that field and still says to calculate one, so this module computes a
+fallback for responses that lack it.
+
     https://api.met.no/weatherapi/locationforecast/2.0/documentation
 
 Two rules from their terms, both enforced:
@@ -28,7 +35,11 @@ from carlib.core.errors import NotAvailableError
 from carlib.weather.base import Provider, register
 from carlib.weather.types import Condition, Conditions, Forecast
 
-BASE_URL = 'https://api.met.no/weatherapi/locationforecast/2.0/compact'
+# `complete` rather than `compact`. The extra instant fields are the
+# reason: wind gust, dew point, UV index, fog fraction and cloud cover
+# by altitude are complete-only, and reading them from a compact
+# response silently yields None.
+BASE_URL = 'https://api.met.no/weatherapi/locationforecast/2.0/complete'
 
 # Their symbol codes are compound: a base word, sometimes a modifier,
 # and a _day/_night/_polartwilight suffix.
@@ -68,6 +79,50 @@ def parse_symbol(code: str) -> Condition:
         if needle in lowered:
             return condition
     return Condition.UNKNOWN
+
+
+def apparent_temperature(temperature: float | None,
+                         wind_speed: float | None,
+                         humidity: float | None) -> float | None:
+    """
+    How cold or hot it feels, when the service does not say.
+
+    Only a fallback: `complete` now reports apparent_air_temperature,
+    which is preferred wherever it appears.
+
+    Thresholds follow the ones MET documents for Yr, so a computed
+    value stays close to what Yr shows: wind chill below 10 C with
+    wind above 1.33 m/s, heat index above 26 C with humidity above
+    40 %, and the plain temperature between.
+
+    There is no standard formula for apparent temperature -- it
+    differs between services, and ideally would account for solar
+    radiation, which forecasts do not carry.
+    """
+    if temperature is None:
+        return None
+
+    if temperature < 10.0 and wind_speed is not None:
+        if wind_speed <= 1.33:
+            return round(temperature, 1)
+        # The JAG/TI formula takes km/h; MET reports m/s.
+        kmh = wind_speed * 3.6
+        factor = kmh ** 0.16
+        chill = (13.12 + 0.6215 * temperature
+                 - 11.37 * factor + 0.3965 * temperature * factor)
+        return round(chill, 1)
+
+    if temperature > 26.0 and humidity is not None and humidity > 40.0:
+        t = temperature
+        h = humidity
+        index = (-8.784695 + 1.61139411 * t + 2.338549 * h
+                 - 0.14611605 * t * h - 0.012308094 * t * t
+                 - 0.016424828 * h * h + 0.002211732 * t * t * h
+                 + 0.00072546 * t * h * h
+                 - 0.000003582 * t * t * h * h)
+        return round(index, 1)
+
+    return round(temperature, 1)
 
 
 def _time(value: str | None) -> datetime | None:
@@ -111,8 +166,23 @@ def parse_entry(entry: dict) -> Conditions:
         wind_gust=instant.get('wind_speed_of_gust'),
         wind_direction=instant.get('wind_from_direction'),
         cloud_cover=instant.get('cloud_area_fraction'),
+        cloud_low=instant.get('cloud_area_fraction_low'),
+        cloud_medium=instant.get('cloud_area_fraction_medium'),
+        cloud_high=instant.get('cloud_area_fraction_high'),
+        fog=instant.get('fog_area_fraction'),
         uv_index=instant.get('ultraviolet_index_clear_sky'),
     )
+
+    # Prefer what the service reports. apparent_air_temperature is
+    # newer than MET's own FAQ, which still says to calculate it, so
+    # fall back to computing when it is absent -- older responses and
+    # other providers will not have it.
+    reported = instant.get('apparent_air_temperature')
+    if reported is not None:
+        result.feels_like = reported
+    else:
+        result.feels_like = apparent_temperature(
+            result.temperature, result.wind_speed, result.humidity)
 
     for key, hours in (('next_1_hours', 1),
                        ('next_6_hours', 6),
@@ -127,8 +197,14 @@ def parse_entry(entry: dict) -> Conditions:
         result.symbol = summary.get('symbol_code', '')
         result.condition = parse_symbol(result.symbol)
         result.precipitation = details.get('precipitation_amount')
+        result.precipitation_min = details.get(
+            'precipitation_amount_min')
+        result.precipitation_max = details.get(
+            'precipitation_amount_max')
         result.precipitation_probability = details.get(
             'probability_of_precipitation')
+        result.thunder_probability = details.get(
+            'probability_of_thunder')
         result.period_hours = hours
         break
 

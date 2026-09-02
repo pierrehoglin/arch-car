@@ -75,11 +75,18 @@ class Conditions:
     wind_direction: float | None = None     # degrees, meteorological
 
     cloud_cover: float | None = None        # %
+    cloud_low: float | None = None          # %
+    cloud_medium: float | None = None       # %
+    cloud_high: float | None = None         # %
+    fog: float | None = None                # %
     uv_index: float | None = None
     visibility: float | None = None         # metres
 
     precipitation: float | None = None      # mm over the period
+    precipitation_min: float | None = None  # mm, low estimate
+    precipitation_max: float | None = None  # mm, high estimate
     precipitation_probability: float | None = None      # %
+    thunder_probability: float | None = None            # %
 
     condition: Condition = Condition.UNKNOWN
     symbol: str = ''                        # the provider's own code
