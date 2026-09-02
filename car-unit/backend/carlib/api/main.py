@@ -24,7 +24,7 @@ import asyncio
 import logging
 import contextlib
 
-from fastapi import FastAPI, Request
+from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -151,6 +151,13 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title='carlib', lifespan=lifespan)
 
+# Everything under one prefix so the frontend can proxy a single path
+# in development, and so a UI route can never collide with an
+# endpoint once the daemon serves the built assets from /.
+API_PREFIX = '/api'
+
+api = APIRouter(prefix=API_PREFIX)
+
 
 @app.exception_handler(CarError)
 async def handle_error(request: Request, exc: CarError) -> JSONResponse:
@@ -224,119 +231,119 @@ class PlaceBody(BaseModel):
 
 # --- Routes ----------------------------------------------------------------
 
-@app.get('/health')
+@api.get('/health')
 async def get_health() -> dict:
     return await routes.health()
 
 
-@app.get('/fm')
+@api.get('/fm')
 async def get_fm() -> dict:
     return await routes.fm_status()
 
 
-@app.post('/fm/play')
+@api.post('/fm/play')
 async def post_fm_play(body: PlayBody | None = None) -> dict:
     body = body or PlayBody()
     return await routes.fm_play(body.station, body.gain, body.rds)
 
 
-@app.post('/fm/pause')
+@api.post('/fm/pause')
 async def post_fm_pause() -> dict:
     return await routes.fm_pause()
 
 
-@app.post('/fm/toggle')
+@api.post('/fm/toggle')
 async def post_fm_toggle() -> dict:
     return await routes.fm_toggle()
 
 
-@app.post('/fm/stop')
+@api.post('/fm/stop')
 async def post_fm_stop() -> dict:
     return await routes.fm_stop()
 
 
-@app.post('/fm/tune')
+@api.post('/fm/tune')
 async def post_fm_tune(body: TuneBody) -> dict:
     return await routes.fm_tune(body.offset)
 
 
-@app.post('/fm/seek')
+@api.post('/fm/seek')
 async def post_fm_seek(body: SeekBody | None = None) -> dict:
     body = body or SeekBody()
     return await routes.fm_seek(body.direction)
 
 
-@app.post('/fm/preset-step')
+@api.post('/fm/preset-step')
 async def post_fm_preset_step(body: SeekBody | None = None) -> dict:
     body = body or SeekBody()
     return await routes.fm_next_preset(body.direction)
 
 
-@app.get('/fm/rds')
+@api.get('/fm/rds')
 async def get_fm_rds() -> dict:
     return await routes.fm_rds()
 
 
-@app.get('/fm/presets')
+@api.get('/fm/presets')
 async def get_fm_presets() -> list[dict]:
     return await routes.fm_presets()
 
 
-@app.post('/fm/presets')
+@api.post('/fm/presets')
 async def post_fm_preset(body: PresetBody) -> list[dict]:
     return await routes.fm_add_preset(body.frequency, body.name)
 
 
-@app.delete('/fm/presets/{frequency}')
+@api.delete('/fm/presets/{frequency}')
 async def delete_fm_preset(frequency: float) -> list[dict]:
     return await routes.fm_remove_preset(frequency)
 
 
-@app.get('/fm/devices')
+@api.get('/fm/devices')
 async def get_fm_devices() -> list[str]:
     return await routes.fm_devices()
 
 
-@app.get('/fm/signals')
+@api.get('/fm/signals')
 async def get_fm_signals() -> list[dict]:
     return await routes.fm_signals()
 
 
-@app.post('/fm/scan')
+@api.post('/fm/scan')
 async def post_fm_scan(body: ScanBody | None = None) -> list[dict]:
     body = body or ScanBody()
     return await routes.fm_scan(body.threshold, body.integration,
                                 body.identify, body.resume)
 
 
-@app.get('/source')
+@api.get('/source')
 async def get_source() -> dict:
     return await routes.source_status()
 
 
-@app.post('/source/select')
+@api.post('/source/select')
 async def post_source_select(body: SelectBody) -> dict:
     return await routes.source_select(body.name)
 
 
-@app.post('/source/pause')
+@api.post('/source/pause')
 async def post_source_pause() -> dict:
     return await routes.source_pause()
 
 
-@app.post('/source/toggle')
+@api.post('/source/toggle')
 async def post_source_toggle() -> dict:
     return await routes.source_toggle()
 
 
-@app.post('/source/ta-skip')
+@api.post('/source/ta-skip')
 async def post_source_ta_skip() -> dict:
     return await routes.source_ta_skip()
 
 
 # --- Location ---------------------------------------------------------------
 
-@app.get('/geocode/suggest')
+@api.get('/geocode/suggest')
 async def get_geocode_suggest(
         q: str,
         limit: int = 5,
@@ -354,7 +361,7 @@ async def get_geocode_suggest(
                                         bias)
 
 
-@app.get('/geocode/search')
+@api.get('/geocode/search')
 async def get_geocode_search(
         q: str,
         limit: int = 5,
@@ -362,23 +369,23 @@ async def get_geocode_search(
     return await routes.geocode_search(q, limit, country)
 
 
-@app.get('/geocode/reverse')
+@api.get('/geocode/reverse')
 async def get_geocode_reverse(lat: float, lon: float,
                               refresh: bool = False) -> dict:
     return await routes.geocode_reverse(lat, lon, refresh)
 
 
-@app.get('/geocode/current')
+@api.get('/geocode/current')
 async def get_geocode_current() -> dict | None:
     return await routes.geocode_current()
 
 
-@app.get('/places')
+@api.get('/places')
 async def get_places() -> list[dict]:
     return await routes.places_list()
 
 
-@app.get('/places/current')
+@api.get('/places/current')
 async def get_places_current() -> dict | None:
     """
     Where we are, or null before the first fix.
@@ -390,7 +397,7 @@ async def get_places_current() -> dict | None:
     return await routes.places_current()
 
 
-@app.get('/places/{name}')
+@api.get('/places/{name}')
 async def get_place(name: str) -> dict:
     """
     One place by name.
@@ -401,34 +408,38 @@ async def get_place(name: str) -> dict:
     return await routes.places_resolve(name)
 
 
-@app.post('/places')
+@api.post('/places')
 async def post_place(body: PlaceBody) -> list[dict]:
     return await routes.places_save(body.name, body.latitude,
                                     body.longitude, body.altitude,
                                     body.address, body.lookup)
 
 
-@app.delete('/places/{name}')
+@api.delete('/places/{name}')
 async def delete_place(name: str) -> list[dict]:
     return await routes.places_remove(name)
 
 
 # --- Navigation -------------------------------------------------------------
 
-@app.post('/navigate/route')
+@api.post('/navigate/route')
 async def post_navigate_route(body: RouteBody) -> dict:
     """A route through two or more points."""
     return await routes.navigate_route(
         [(p.lat, p.lon) for p in body.points], body.costing)
 
 
-@app.post('/navigate/match')
+@api.post('/navigate/match')
 async def post_navigate_match(body: RouteBody) -> dict:
     """Snap a GPS trace onto the road network."""
     return await routes.navigate_match(
         [(p.lat, p.lon) for p in body.points], body.costing)
 
 
-@app.get('/navigate/status')
+@api.get('/navigate/status')
 async def get_navigate_status() -> dict:
     return await routes.navigate_status()
+
+
+# Registered last, so every route above is on the router by now.
+app.include_router(api)

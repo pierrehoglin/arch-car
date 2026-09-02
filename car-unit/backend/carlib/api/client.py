@@ -46,6 +46,10 @@ from carlib.navigation.types import Route
 # Any host is accepted for a Unix socket; httpx requires one.
 BASE_URL = 'http://carlib'
 
+# Matches API_PREFIX in main.py. Applied once here rather than being
+# written into every path, so moving the API is a one-line change.
+API_PREFIX = '/api'
+
 TIMEOUT = 30.0
 
 # Scanning tunes across the whole band and may identify each station,
@@ -120,7 +124,7 @@ async def request(method: str, path: str,
 
     try:
         async with httpx.AsyncClient(transport=transport,
-                                     base_url=BASE_URL,
+                                     base_url=BASE_URL + API_PREFIX,
                                      timeout=timeout) as client:
             response = await client.request(method, path, json=body,
                                             params=query)
