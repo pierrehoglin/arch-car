@@ -39,11 +39,24 @@ from carlib.location import places
 from carlib.weather import service
 from carlib.core.output import run, emit_json, global_flags, parse_args
 
+# Only show a forecast range once it is wide enough to matter. Below
+# these the percentiles are noise on every line.
+TEMPERATURE_SPREAD = 3.0        # degrees
+WIND_SPREAD = 4.0               # m/s
+
 
 def show_now(conditions, forecast) -> None:
     c = conditions
     print(f'{c.glyph}  {c.summary}')
     print()
+
+    # Only show the forecast range when the models actually disagree.
+    # A range on every line would be noise; a wide one is information.
+    spread = c.temperature_spread
+    if spread is not None and spread >= TEMPERATURE_SPREAD:
+        print(f'  temperature: {c.temperature:.1f}\u00b0C  '
+              f'({c.temperature_min:.0f} to {c.temperature_max:.0f})')
+
     if c.feels_like is not None:
         print(f'  feels like:  {c.feels_like:.0f}\u00b0C')
     if c.humidity is not None:
@@ -55,6 +68,10 @@ def show_now(conditions, forecast) -> None:
                 if c.wind_gust is not None else '')
         print(f'  wind:        {c.wind_speed:.1f} m/s '
               f'{c.wind_compass} {c.wind_arrow}{gust}')
+        wind_spread = c.wind_spread
+        if wind_spread is not None and wind_spread >= WIND_SPREAD:
+            print(f'               forecast range '
+                  f'{c.wind_speed_min:.0f}-{c.wind_speed_max:.0f} m/s')
     if c.cloud_cover is not None:
         layers = ''
         if c.cloud_low is not None:

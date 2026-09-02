@@ -5,7 +5,12 @@ Free, no API key, worldwide with most detail for Scandinavia. Data is
 Creative Commons licensed including commercial use.
 
 Uses the `complete` endpoint. `compact` omits wind gust, dew point,
-UV, fog and cloud layers, which are worth the larger response.
+UV, fog, cloud layers and the forecast percentiles, which are worth
+the larger response.
+
+Locationforecast reports no visibility, so Conditions has no such
+field -- one that nothing ever sets would show as null and read like
+missing data.
 
 `complete` reports apparent_air_temperature. MET's own FAQ predates
 that field and still says to calculate one, so this module computes a
@@ -162,8 +167,12 @@ def parse_entry(entry: dict) -> Conditions:
         humidity=instant.get('relative_humidity'),
         pressure=instant.get('air_pressure_at_sea_level'),
         dew_point=instant.get('dew_point_temperature'),
+        temperature_min=instant.get('air_temperature_percentile_10'),
+        temperature_max=instant.get('air_temperature_percentile_90'),
         wind_speed=instant.get('wind_speed'),
         wind_gust=instant.get('wind_speed_of_gust'),
+        wind_speed_min=instant.get('wind_speed_percentile_10'),
+        wind_speed_max=instant.get('wind_speed_percentile_90'),
         wind_direction=instant.get('wind_from_direction'),
         cloud_cover=instant.get('cloud_area_fraction'),
         cloud_low=instant.get('cloud_area_fraction_low'),
