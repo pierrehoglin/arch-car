@@ -137,7 +137,7 @@ async def _bearer_state(modem_path: str) -> dict:
 
             iface = await bearer.interface or ''
             ip4 = props(await bearer.ip4_config)
-            settings = props(await bearer.properties)
+            bearer_props = props(await bearer.properties)
             stats = props(await bearer.stats)
         except Exception:
             continue
@@ -146,7 +146,7 @@ async def _bearer_state(modem_path: str) -> dict:
             'connected': True,
             'interface': iface,
             'ip_address': ip4.get('address', ''),
-            'apn': settings.get('apn', ''),
+            'apn': bearer_props.get('apn', ''),
             'bytes_rx': int(stats.get('rx-bytes', 0) or 0),
             'bytes_tx': int(stats.get('tx-bytes', 0) or 0),
             'duration': int(stats.get('duration', 0) or 0),

@@ -25,6 +25,7 @@ import json
 import shutil
 import tempfile
 from pathlib import Path
+from dataclasses import dataclass
 from typing import Any
 
 CONFIG_DIR = (
@@ -302,6 +303,77 @@ def get_dict(key: str, default: dict | None = None) -> dict:
     if isinstance(value, dict):
         return value
     return dict(default or {})
+
+
+# --- Catalogue -------------------------------------------------------------
+#
+# What settings exist, so they can be discovered without reading the
+# source. This is documentation, not validation: an undeclared key
+# still works, and a declared one is not created until something sets
+# it.
+#
+# Kept centrally rather than declared by each module. Per-module
+# declarations would mean importing every module to list them, and
+# import side-effects to power a help command is a poor trade.
+
+
+@dataclass(frozen=True)
+class Known:
+    key: str
+    default: Any
+    description: str
+    kind: str = 'str'
+
+
+CATALOGUE: tuple[Known, ...] = (
+    Known('contact', '', 'Email or URL identifying this unit to '
+          'external services. Some weather providers block requests '
+          'they cannot attribute.'),
+
+    Known('fm.autostart', False, 'Start the radio when the daemon '
+          'starts.', 'bool'),
+    Known('fm.gain', 40.0, 'Tuner gain in dB. A bare wire wants ~40; '
+          'a car antenna usually less.', 'float'),
+    Known('fm.rds', True, 'Decode RDS. Off costs less CPU but loses '
+          'station names and traffic announcements.', 'bool'),
+    Known('fm.traffic', True, 'Let traffic announcements interrupt '
+          'whatever is playing.', 'bool'),
+    Known('fm.presets', [], 'Saved stations. Managed by `fm save` and '
+          '`fm forget`.', 'list'),
+    Known('fm.last', {}, 'The station playing when the radio last '
+          'stopped, so it resumes there.', 'dict'),
+
+    Known('weather.provider', 'metno', 'Which weather service to use. '
+          'See `weather providers`.'),
+    Known('weather.contact', '', 'Overrides `contact` for weather '
+          'services only.'),
+    Known('places', [], 'Named locations, shared by anything that '
+          'needs one. Managed by `places save` and `places forget`.',
+          'list'),
+    Known('location.latitude', None, 'Pin "here" to a latitude '
+          'instead of using GPS. Set with location.longitude.',
+          'float'),
+    Known('location.longitude', None, 'Pin "here" to a longitude '
+          'instead of using GPS.', 'float'),
+    Known('location.altitude', None, 'Altitude in metres for the '
+          'pinned position.', 'float'),
+)
+
+_BY_KEY = {entry.key: entry for entry in CATALOGUE}
+
+
+def known(key: str) -> Known | None:
+    return _BY_KEY.get(key)
+
+
+def catalogue() -> list[Known]:
+    return sorted(CATALOGUE, key=lambda e: e.key)
+
+
+def declared_keys() -> frozenset:
+    # Annotated as frozenset because this module defines its own
+    # set(), which shadows the builtin in annotations.
+    return frozenset(_BY_KEY)
 
 
 # --- Sections --------------------------------------------------------------

@@ -11,6 +11,7 @@ the reverse has to as well: RadioState holds an Rds, SourceState holds
 a list of Player.
 """
 
+import types
 import typing
 from dataclasses import fields, is_dataclass
 from typing import Any, TypeVar
@@ -19,9 +20,18 @@ T = TypeVar('T')
 
 
 def _unwrap_optional(annotation):
-    """`int | None` -> int. Anything else is returned unchanged."""
+    """
+    `int | None` -> int. Anything else is returned unchanged.
+
+    Both spellings have to be handled: typing.Optional[X] gives an
+    origin of typing.Union, while the PEP 604 `X | None` gives
+    types.UnionType. They are different objects, and comparing the
+    repr instead of the type quietly fails for the second -- which
+    meant nested dataclasses declared `Conditions | None` were left as
+    plain dicts.
+    """
     origin = typing.get_origin(annotation)
-    if origin is typing.Union or str(origin) == 'types.UnionType':
+    if origin is typing.Union or origin is types.UnionType:
         args = [a for a in typing.get_args(annotation)
                 if a is not type(None)]
         if len(args) == 1:

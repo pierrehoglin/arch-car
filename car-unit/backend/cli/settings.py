@@ -2,7 +2,9 @@
 """
 User settings.
 
-    settings                        # show everything
+    settings                        # what has been set
+    settings show --all             # everything available, set or not
+    settings describe fm.gain       # what one setting is for
     settings get fm.gain
     settings get fm.gain 40         # with a fallback
     settings set fm.gain 42
@@ -64,22 +66,89 @@ def render(value) -> str:
 
 async def cmd_show(args) -> None:
     data = settings.reload()
+    rows = flatten(data)
+
+    if args.all:
+        # Merge in everything declared but never set, so the catalogue
+        # is browsable without reading the source.
+        seen = {key for key, _ in rows}
+        for entry in settings.catalogue():
+            if entry.key not in seen:
+                rows.append((entry.key, None))
+        rows.sort()
 
     if args.json:
-        emit_json(data)
+        if args.all:
+            emit_json([
+                {'key': k,
+                 'value': v,
+                 'set': v is not None or k in {r for r, _ in flatten(data)},
+                 'description': (settings.known(k).description
+                                 if settings.known(k) else '')}
+                for k, v in rows])
+        else:
+            emit_json(data)
         return
 
-    rows = flatten(data)
     if not rows:
         print('no settings')
+        print('list everything available with: settings show --all',
+              file=sys.stderr)
         print(f'file: {settings.path()}', file=sys.stderr)
         return
 
     width = max(len(key) for key, _ in rows)
-    for key, value in rows:
-        print(f'{key:<{width}}  {render(value)}')
+    configured = {key for key, _ in flatten(data)}
 
-    print(f'\n{settings.path()}', file=sys.stderr)
+    for key, value in rows:
+        if key in configured:
+            print(f'{key:<{width}}  {render(value)}')
+        else:
+            entry = settings.known(key)
+            shown = ('' if entry is None or entry.default in (None, '')
+                     else render(entry.default))
+            print(f'{key:<{width}}  {shown:<12} (default)')
+
+    if not args.all:
+        print('\nsettings show --all lists everything available',
+              file=sys.stderr)
+    print(f'{settings.path()}', file=sys.stderr)
+
+
+async def cmd_describe(args) -> None:
+    """What a setting is for."""
+    entry = settings.known(args.key)
+    if entry is None:
+        if args.json:
+            emit_json(None)
+            return
+        print(f'{args.key} is not a known setting', file=sys.stderr)
+        print('settings show --all lists the ones that are',
+              file=sys.stderr)
+        return
+
+    sentinel = object()
+    current = settings.get(args.key, sentinel)
+
+    if args.json:
+        emit_json({
+            'key': entry.key,
+            'kind': entry.kind,
+            'default': entry.default,
+            'description': entry.description,
+            'value': None if current is sentinel else current,
+            'set': current is not sentinel,
+        })
+        return
+
+    print(entry.key)
+    print(f'  {entry.description}')
+    print(f'  type:    {entry.kind}')
+    print(f'  default: {render(entry.default)}')
+    if current is not sentinel:
+        print(f'  value:   {render(current)}')
+    else:
+        print('  value:   (not set)')
 
 
 async def cmd_get(args) -> None:
@@ -174,8 +243,15 @@ def main() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest='cmd')
 
-    p = sub.add_parser('show', parents=[common], help='show everything')
+    p = sub.add_parser('show', parents=[common], help='show settings')
     p.set_defaults(fn=cmd_show)
+    p.add_argument('--all', action='store_true',
+                   help='include settings that exist but are unset')
+
+    p = sub.add_parser('describe', parents=[common],
+                       help='what a setting is for')
+    p.set_defaults(fn=cmd_describe)
+    p.add_argument('key')
 
     p = sub.add_parser('get', parents=[common], help='read one setting')
     p.set_defaults(fn=cmd_get)
@@ -200,7 +276,8 @@ def main() -> int:
                        help='open in $EDITOR, validated on save')
     p.set_defaults(fn=cmd_edit)
 
-    args = parse_args(ap, 'show', defaults={'json': False})
+    args = parse_args(ap, 'show',
+                      defaults={'json': False, 'all': False})
     return run(args.fn(args))
 
 
