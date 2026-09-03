@@ -37,7 +37,7 @@
       <Icon name="compass" size={22} />
     </button>
     <button class="control" aria-label="Zoom out">
-      <Icon name="minus" size={22} />
+      <Icon name="remove" size={22} />
     </button>
   </div>
 

@@ -1,7 +1,6 @@
 <script lang="ts">
   import Icon from '$lib/Icon.svelte'
   import Segmented from '$lib/ui/Segmented.svelte'
-  import { display } from '$lib/settings.svelte'
 
   /* Placeholder throughout. Nothing is wired to the daemon. */
 
@@ -90,20 +89,6 @@
     </button>
   </div>
 
-  <div class="volume">
-    <Icon name="volume" size={20} />
-    <input
-      type="range"
-      min="0"
-      max="100"
-      value={display.volume}
-      style:--fill="{display.volume}%"
-      aria-label="Volume"
-      oninput={(e) => (display.volume = +e.currentTarget.value)}
-    />
-    <span class="time">{display.volume}</span>
-  </div>
-
   <section class="queue">
     <div class="eyebrow">Up next</div>
     {#each queue as item (item.title)}
@@ -160,8 +145,7 @@
     opacity: var(--dim-secondary);
   }
 
-  .progress,
-  .volume {
+  .progress {
     display: flex;
     align-items: center;
     gap: 14px;
@@ -179,9 +163,9 @@
 
   input[type='range'] {
     flex: 1;
-    height: 4px;
+    height: 8px;
     appearance: none;
-    border-radius: 2px;
+    border-radius: 4px;
     background: linear-gradient(
       to right,
       var(--accent) var(--fill),
@@ -191,15 +175,15 @@
 
   input[type='range']::-webkit-slider-thumb {
     appearance: none;
-    width: 18px;
-    height: 18px;
+    width: 20px;
+    height: 20px;
     background: var(--knob);
     border-radius: 50%;
   }
 
   input[type='range']::-moz-range-thumb {
-    width: 18px;
-    height: 18px;
+    width: 20px;
+    height: 20px;
     background: var(--knob);
     border: 0;
     border-radius: 50%;

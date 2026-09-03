@@ -53,6 +53,8 @@
       {title}
       volume={display.volume}
       onvolume={(v) => (display.volume = v)}
+      muted={display.muted}
+      onmute={(v) => (display.muted = v)}
     />
 
     <main class="content">

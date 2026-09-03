@@ -55,7 +55,10 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    width: 120px;
+    /* The shell grid fixes the column, so the rail just fills it --
+       one place to change the width rather than two that can drift
+       apart. */
+    width: 100%;
     height: 100%;
     padding: 0 0 10px;
     background: var(--rail);

@@ -5,9 +5,11 @@
     title: string
     volume: number
     onvolume: (value: number) => void
+    muted: boolean
+    onmute: (muted: boolean) => void
   }
 
-  let { title, volume, onvolume }: Props = $props()
+  let { title, volume, onvolume, muted, onmute }: Props = $props()
 
   /* Temperature and signal are placeholders -- nothing is wired to
      the daemon yet. The clock is local and real. */
@@ -27,18 +29,34 @@
     }),
   )
 
-  const step = (delta: number) =>
-    onvolume(Math.max(0, Math.min(100, volume + delta)))
+  /* Any deliberate move of the volume un-mutes. Reaching for it is a
+     clear enough signal that you want to hear something, and changing
+     a level that stays silent is the sort of thing you press twice
+     before noticing. */
+  const change = (value: number) => {
+    if (muted) onmute(false)
+    onvolume(Math.max(0, Math.min(100, value)))
+  }
+
+  const step = (delta: number) => change(volume + delta)
 </script>
 
 <header class="bar">
   <h1>{title}</h1>
 
   <div class="volume">
-    <Icon name="volume" size={20} />
+    <button
+      class="mute"
+      class:muted
+      onclick={() => onmute(!muted)}
+      aria-pressed={muted}
+      aria-label={muted ? 'Unmute' : 'Mute'}
+    >
+      <Icon name={muted ? 'muted' : 'volume'} size={26} />
+    </button>
 
     <button class="round" onclick={() => step(-5)} aria-label="Quieter">
-      &minus;
+      <Icon name="remove" size={18} />
     </button>
 
     <input
@@ -47,16 +65,16 @@
       min="0"
       max="100"
       value={volume}
-      style:--fill="{volume}%"
-      oninput={(e) => onvolume(+e.currentTarget.value)}
+      style:--fill="{muted ? 0 : volume}%"
+      oninput={(e) => change(+e.currentTarget.value)}
       aria-label="Volume"
     />
 
     <button class="round" onclick={() => step(5)} aria-label="Louder">
-      &plus;
+      <Icon name="add" size={18} />
     </button>
 
-    <span class="value">{volume}</span>
+    <span class="value" class:muted>{volume}</span>
   </div>
 
   <div class="status">
@@ -106,22 +124,29 @@
     place-items: center;
     width: 34px;
     height: 34px;
-    font-size: 17px;
-    line-height: 1;
-    background: var(--chip);
+    color: var(--text-dim);
+    background: none;
+    /* Just an edge, the same one that divides everything else. A
+       filled chip here competed with the slider beside it, which is
+       the thing worth looking at. */
     border: 1px solid var(--border);
     border-radius: 50%;
   }
 
   .round:active {
-    background: var(--panel-2);
+    background: var(--accent-soft);
+  }
+
+  .round:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
   }
 
   .slider {
-    width: 152px;
-    height: 4px;
+    width: 200px;
+    height: 8px;
     appearance: none;
-    border-radius: 2px;
+    border-radius: 4px;
     /* Filled to the knob rather than a plain track: the level is the
        information, and a uniform track hides it. */
     background: linear-gradient(
@@ -133,24 +158,52 @@
 
   .slider::-webkit-slider-thumb {
     appearance: none;
-    width: 16px;
-    height: 16px;
+    width: 18px;
+    height: 18px;
     background: var(--knob);
     border-radius: 50%;
   }
 
   .slider::-moz-range-thumb {
-    width: 16px;
-    height: 16px;
+    width: 18px;
+    height: 18px;
     background: var(--knob);
     border: 0;
     border-radius: 50%;
+  }
+
+  /* Full strength rather than inheriting the row's dim: this is a
+     control, not a label, and it is the one thing here pressed
+     without looking. */
+  .mute {
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    color: var(--text);
+    background: none;
+    border: 0;
+    border-radius: 50%;
+  }
+
+  .mute.muted {
+    color: var(--danger);
+  }
+
+  .mute:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
   }
 
   .value {
     min-width: 24px;
     font-variant-numeric: tabular-nums;
     font-size: 14px;
+  }
+
+  .value.muted {
+    color: var(--text-faint);
+    text-decoration: line-through;
   }
 
   .status {
@@ -160,10 +213,14 @@
     gap: 16px;
   }
 
+  /* Same face and colour as the clock: both are glanced at from the
+     driver's seat, and the old dimmed 14px disappeared next to it. */
   .temp {
-    font-size: 14px;
-    color: var(--text-dim);
-    opacity: var(--dim-secondary);
+    font-family: var(--font-display);
+    font-size: 20px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
   }
 
   .signal {

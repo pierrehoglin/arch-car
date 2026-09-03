@@ -20,6 +20,9 @@ interface Display {
   ambient: string
   brightness: number
   volume: number
+  /** Silences output without losing the level, so unmuting comes back
+   *  where it was rather than at zero. */
+  muted: boolean
   panel: boolean
 }
 
@@ -29,6 +32,7 @@ export const display = $state<Display>({
   ambient: '#d8b146',
   brightness: 72,
   volume: 60,
+  muted: false,
   panel: true,
 })
 

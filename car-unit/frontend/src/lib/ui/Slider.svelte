@@ -46,9 +46,9 @@
 
   input {
     width: 260px;
-    height: 4px;
+    height: 8px;
     appearance: none;
-    border-radius: 2px;
+    border-radius: 4px;
     background: linear-gradient(
       to right,
       var(--accent) var(--fill),
@@ -58,15 +58,15 @@
 
   input::-webkit-slider-thumb {
     appearance: none;
-    width: 20px;
-    height: 20px;
+    width: 22px;
+    height: 22px;
     background: var(--knob);
     border-radius: 50%;
   }
 
   input::-moz-range-thumb {
-    width: 20px;
-    height: 20px;
+    width: 22px;
+    height: 22px;
     background: var(--knob);
     border: 0;
     border-radius: 50%;
