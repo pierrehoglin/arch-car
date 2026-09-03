@@ -1,8 +1,17 @@
 <script lang="ts" generics="T extends string">
+  interface Option<V> {
+    value: V
+    label: string
+    /** Renders this option as a link. For a segmented control whose
+     *  choices are routes rather than local state. */
+    href?: string
+  }
+
   interface Props {
-    options: { value: T; label: string }[]
+    options: Option<T>[]
     value: T
-    onchange: (value: T) => void
+    /** Omit when the options carry hrefs -- navigation is the change. */
+    onchange?: (value: T) => void
     label?: string
   }
 
@@ -11,13 +20,23 @@
 
 <div class="segmented" role="group" aria-label={label}>
   {#each options as option (option.value)}
-    <button
-      class:selected={value === option.value}
-      onclick={() => onchange(option.value)}
-      aria-pressed={value === option.value}
-    >
-      {option.label}
-    </button>
+    {#if option.href}
+      <a
+        class:selected={value === option.value}
+        href={option.href}
+        aria-current={value === option.value ? 'page' : undefined}
+      >
+        {option.label}
+      </a>
+    {:else}
+      <button
+        class:selected={value === option.value}
+        onclick={() => onchange?.(option.value)}
+        aria-pressed={value === option.value}
+      >
+        {option.label}
+      </button>
+    {/if}
   {/each}
 </div>
 
@@ -30,7 +49,10 @@
     border-radius: 10px;
   }
 
-  button {
+  button,
+  a {
+    display: grid;
+    place-items: center;
     min-width: 78px;
     height: 38px;
     padding: 0 18px;
@@ -40,17 +62,19 @@
     letter-spacing: 0.1em;
     text-transform: uppercase;
     color: var(--text-dim);
+    text-decoration: none;
     background: none;
     border: 0;
     border-radius: 8px;
   }
 
-  button.selected {
+  .selected {
     color: var(--accent-ink);
     background: var(--accent);
   }
 
-  button:focus-visible {
+  button:focus-visible,
+  a:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
   }

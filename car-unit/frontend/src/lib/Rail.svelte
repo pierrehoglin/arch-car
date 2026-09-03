@@ -46,8 +46,6 @@
     <Icon name="settings" size={30} />
     <span class="label">Settings</span>
   </a>
-
-  <div class="model">Saab 9-5</div>
 </nav>
 
 <style>
@@ -135,17 +133,6 @@
 
   .settings {
     margin-top: auto;
-  }
-
-  .model {
-    margin-top: var(--spacing-s);
-    font-family: var(--font-display);
-    font-size: 9px;
-    font-weight: 600;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: var(--text-faint);
-    opacity: var(--dim-secondary);
   }
 
   @media (prefers-reduced-motion: reduce) {

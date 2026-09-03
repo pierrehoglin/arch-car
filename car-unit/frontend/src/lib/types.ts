@@ -37,6 +37,16 @@ export const SETTINGS_SECTIONS: Section[] = [
   { href: '/settings/about', label: 'About' },
 ]
 
+/** Media sources, each its own route. FM and USB have controls that
+ *  have nothing to do with a Bluetooth player -- a frequency dial
+ *  against a track list -- so they are pages, not a switch inside
+ *  one. */
+export const MEDIA_SOURCES: Section[] = [
+  { href: '/media/bluetooth', label: 'Bluetooth' },
+  { href: '/media/fm', label: 'FM' },
+  { href: '/media/usb', label: 'USB' },
+]
+
 /** The four ambient colours. Stored as the canonical swatch hex;
  *  accentFor() resolves the per-theme contrast variant. */
 export const SWATCHES = ['#d8b146', '#1d4e91', '#b21f2d', '#7fe0a8']

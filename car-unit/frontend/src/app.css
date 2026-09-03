@@ -44,9 +44,14 @@
   --chip: #1b2124;
   --border: rgba(233, 237, 236, 0.09);
   --hairline: rgba(233, 237, 236, 0.09);
+  /* Opaque rather than an alpha of --text. Tabler glyphs are several
+     paths, and where two strokes cross, a translucent colour stacks
+     with itself -- the joints in the map and car icons came out
+     visibly brighter than the lines feeding them. Mixed against the
+     background so the result matches what the alpha produced. */
   --text: #e9edec;
-  --text-dim: rgba(233, 237, 236, 0.5);
-  --text-faint: rgba(233, 237, 236, 0.32);
+  --text-dim: color-mix(in srgb, #e9edec 50%, #0b0e0f);
+  --text-faint: color-mix(in srgb, #e9edec 32%, #0b0e0f);
   --accent: #d8b146;
   --accent-ink: #161200; /* text/icons on the accent fill */
   --amber: #e6b45a;
@@ -67,8 +72,8 @@
   --border: rgba(20, 24, 26, 0.1);
   --hairline: rgba(20, 24, 26, 0.1);
   --text: #14181a;
-  --text-dim: rgba(20, 24, 26, 0.55);
-  --text-faint: rgba(20, 24, 26, 0.38);
+  --text-dim: color-mix(in srgb, #14181a 55%, #dfe2dd);
+  --text-faint: color-mix(in srgb, #14181a 38%, #dfe2dd);
   --accent: #1d4e91;
   --accent-ink: #ffffff;
   --amber: #c07d1f;
@@ -94,8 +99,8 @@
   --border: rgba(255, 255, 255, 0.05);
   --hairline: rgba(255, 255, 255, 0.05);
   --text: #8a7f5f;
-  --text-dim: rgba(138, 127, 95, 0.5);
-  --text-faint: rgba(138, 127, 95, 0.32);
+  --text-dim: color-mix(in srgb, #8a7f5f 50%, #000000);
+  --text-faint: color-mix(in srgb, #8a7f5f 32%, #000000);
   --accent-ink: #161200;
   --amber: #3a3120;
   --blue: #3a3120;

@@ -1,12 +1,8 @@
 <script lang="ts">
   import Icon from '$lib/Icon.svelte'
-  import Segmented from '$lib/ui/Segmented.svelte'
 
   /* Placeholder throughout. Nothing is wired to the daemon. */
 
-  type Source = 'bluetooth' | 'fm' | 'usb'
-
-  let source = $state<Source>('bluetooth')
   let playing = $state(true)
   let position = $state(299)
 
@@ -18,10 +14,13 @@
     length: 327,
   }
 
+  /* Only some phones send this. A queue needs AVRCP browsing, which
+     Android generally supports and iOS does not -- so the section is
+     hidden when empty rather than showing a box that looks broken. */
   const queue = [
-    { title: 'Harbour Lights — Ora Vale', length: '3:52' },
-    { title: 'Northbound — Kite Season', length: '4:18' },
-    { title: 'Slow Ferry — Halva Vägen', length: '2:59' },
+    { title: 'Harbour Lights \u2014 Ora Vale', length: '3:52' },
+    { title: 'Northbound \u2014 Kite Season', length: '4:18' },
+    { title: 'Slow Ferry \u2014 Halva V\u00e4gen', length: '2:59' },
   ]
 
   const clock = (seconds: number) => {
@@ -32,63 +31,52 @@
   const elapsed = $derived((position / track.length) * 100)
 </script>
 
-<div class="media">
-  <Segmented
-    label="Source"
-    options={[
-      { value: 'bluetooth', label: 'Bluetooth' },
-      { value: 'fm', label: 'FM' },
-      { value: 'usb', label: 'USB' },
-    ]}
-    value={source}
-    onchange={(v: Source) => (source = v)}
+<!-- A gradient stands in for artwork. Bluetooth rarely sends any,
+     and an empty grey square reads as broken. -->
+<div class="art">
+  <Icon name="note" size={56} />
+</div>
+
+<div class="titles">
+  <h2>{track.title}</h2>
+  <p class="artist">{track.artist}</p>
+  <p class="album">{track.album}</p>
+  <p class="via">via {track.via}</p>
+</div>
+
+<div class="progress">
+  <span class="time">{clock(position)}</span>
+  <input
+    type="range"
+    min="0"
+    max={track.length}
+    value={position}
+    style:--fill="{elapsed}%"
+    aria-label="Position"
+    oninput={(e) => (position = +e.currentTarget.value)}
   />
+  <span class="time">{clock(track.length)}</span>
+</div>
 
-  <!-- A gradient stands in for artwork. Bluetooth rarely sends any,
-       and an empty grey square reads as broken. -->
-  <div class="art">
-    <Icon name="note" size={56} />
-  </div>
+<div class="transport">
+  <button class="round" aria-label="Previous">
+    <Icon name="previous" size={22} />
+  </button>
 
-  <div class="titles">
-    <h2>{track.title}</h2>
-    <p class="artist">{track.artist}</p>
-    <p class="album">{track.album}</p>
-    <p class="via">via {track.via}</p>
-  </div>
+  <button
+    class="round primary"
+    aria-label={playing ? 'Pause' : 'Play'}
+    onclick={() => (playing = !playing)}
+  >
+    <Icon name={playing ? 'pause' : 'play'} size={30} />
+  </button>
 
-  <div class="progress">
-    <span class="time">{clock(position)}</span>
-    <input
-      type="range"
-      min="0"
-      max={track.length}
-      value={position}
-      style:--fill="{elapsed}%"
-      aria-label="Position"
-      oninput={(e) => (position = +e.currentTarget.value)}
-    />
-    <span class="time">{clock(track.length)}</span>
-  </div>
+  <button class="round" aria-label="Next">
+    <Icon name="next" size={22} />
+  </button>
+</div>
 
-  <div class="transport">
-    <button class="round" aria-label="Previous">
-      <Icon name="previous" size={22} />
-    </button>
-
-    <button
-      class="round primary"
-      aria-label={playing ? 'Pause' : 'Play'}
-      onclick={() => (playing = !playing)}
-    >
-      <Icon name={playing ? 'pause' : 'play'} size={30} />
-    </button>
-
-    <button class="round" aria-label="Next">
-      <Icon name="next" size={22} />
-    </button>
-  </div>
-
+{#if queue.length}
   <section class="queue">
     <div class="eyebrow">Up next</div>
     {#each queue as item (item.title)}
@@ -98,18 +86,9 @@
       </div>
     {/each}
   </section>
-</div>
+{/if}
 
 <style>
-  .media {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 18px;
-    height: 100%;
-    padding: 20px 24px 24px;
-    overflow-y: auto;
-  }
 
   .art {
     display: grid;
