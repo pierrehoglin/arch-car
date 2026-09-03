@@ -18,6 +18,8 @@
 
   import type { Component } from 'svelte'
 
+  import IconBluetooth from '~icons/tabler/bluetooth'
+  import IconBluetoothOn from '~icons/tabler/bluetooth-connected'
   import IconCamera from '~icons/tabler/camera'
   import IconCar from '~icons/tabler/brand-speedtest'
   import IconCloud from '~icons/tabler/cloud'
@@ -55,6 +57,8 @@
 
   const icons: Record<string, Component> = {
     add: IconPlus,
+    bluetooth: IconBluetooth,
+    'bluetooth-connected': IconBluetoothOn,
     camera: IconCamera,
     car: IconCar,
     cloud: IconCloud,

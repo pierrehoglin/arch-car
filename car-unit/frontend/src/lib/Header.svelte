@@ -1,5 +1,6 @@
 <script lang="ts">
   import Icon from './Icon.svelte'
+  import { status } from './status.svelte'
 
   interface Props {
     title: string
@@ -11,11 +12,12 @@
 
   let { title, volume, onvolume, muted, onmute }: Props = $props()
 
-  /* Temperature and signal are placeholders -- nothing is wired to
-     the daemon yet. The clock is local and real. */
+  /* Temperature, signal and Bluetooth come from the status store --
+     placeholders until the daemon feeds them. The clock is local and
+     real. */
   let now = $state(new Date())
-  const outside = 19
-  const bars = 4
+  const outside = $derived(status.outside)
+  const bars = $derived(status.bars)
 
   $effect(() => {
     const timer = setInterval(() => (now = new Date()), 10_000)
@@ -29,9 +31,13 @@
     }),
   )
 
-  /* Any deliberate move of the volume un-mutes. Reaching for it is a
-     clear enough signal that you want to hear something, and changing
-     a level that stays silent is the sort of thing you press twice
+  /* Muting drops the slider to zero and unmuting puts it back: the
+     level is kept in `volume` throughout, so the thumb returns to
+     where it was rather than to silence.
+
+     Any deliberate move un-mutes. Reaching for the volume is a clear
+     enough signal that you want to hear something, and changing a
+     level that stays silent is the sort of thing you press twice
      before noticing. */
   const change = (value: number) => {
     if (muted) onmute(false)
@@ -64,7 +70,7 @@
       type="range"
       min="0"
       max="100"
-      value={volume}
+      value={muted ? 0 : volume}
       style:--fill="{muted ? 0 : volume}%"
       oninput={(e) => change(+e.currentTarget.value)}
       aria-label="Volume"
@@ -79,6 +85,20 @@
 
   <div class="status">
     <span class="temp">{outside}°</span>
+
+    <a
+      class="bluetooth"
+      class:connected={status.bluetooth}
+      href="/settings/connectivity"
+      aria-label={status.bluetooth
+        ? 'Bluetooth connected'
+        : 'Bluetooth, nothing connected'}
+    >
+      <Icon
+        name={status.bluetooth ? 'bluetooth-connected' : 'bluetooth'}
+        size={22}
+      />
+    </a>
 
     <!-- Drawn rather than an icon, so the number of lit bars is data. -->
     <span class="signal" aria-label="{bars} of 4 bars">
@@ -111,12 +131,15 @@
     text-transform: uppercase;
   }
 
+  /* No group opacity here. Under Night Panel --dim-secondary drops
+     to 0.12, which would fade the controls to nothing however white
+     they are set -- and volume is adjusted in the dark more than
+     anywhere else. The status block beside it still dims. */
   .volume {
     display: flex;
     align-items: center;
     gap: var(--spacing-s);
     color: var(--text-dim);
-    opacity: var(--dim-secondary);
   }
 
   .round {
@@ -124,7 +147,9 @@
     place-items: center;
     width: 34px;
     height: 34px;
-    color: var(--text-dim);
+    /* Full strength, like the speaker and the readout beside them:
+       these are controls, and the row's dim is for labels. */
+    color: var(--text);
     background: none;
     /* Just an edge, the same one that divides everything else. A
        filled chip here competed with the slider beside it, which is
@@ -195,10 +220,15 @@
     outline-offset: 2px;
   }
 
+  /* Matches the temperature and clock: same face, same size, same
+     strength. All three are glanced at rather than read. */
   .value {
-    min-width: 24px;
+    min-width: 30px;
+    font-family: var(--font-display);
+    font-size: 20px;
+    font-weight: 600;
     font-variant-numeric: tabular-nums;
-    font-size: 14px;
+    color: var(--text);
   }
 
   .value.muted {
@@ -206,16 +236,45 @@
     text-decoration: line-through;
   }
 
+  /* No gap here. Each item pads itself instead, because a uniform
+     gap measures box edges and the eye measures ink: the Bluetooth
+     glyph sits inside a touch target with whitespace already in it,
+     so an even gap left it looking adrift from the temperature.
+     Padding per item lets the icon take less and the bare text take
+     more, and the row reads evenly. */
   .status {
     display: flex;
     align-items: center;
     justify-content: flex-end;
-    gap: var(--spacing);
   }
 
   /* Same face and colour as the clock: both are glanced at from the
      driver's seat, and the old dimmed 14px disappeared next to it. */
+  /* A link rather than a readout: the whole point is that it takes
+     you to the pairing screen, and that is not discoverable if it
+     looks like the signal bars beside it. */
+  .bluetooth {
+    display: grid;
+    place-items: center;
+    /* Less than its neighbours on purpose. The glyph does not reach
+       the edges of its own 24px box -- roughly 3px of air each side --
+       so matching their 10px would read as 13. */
+    padding: 9px 7px;
+    color: var(--text-dim);
+    border-radius: var(--radius-sm);
+  }
+
+  .bluetooth.connected {
+    color: var(--accent);
+  }
+
+  .bluetooth:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
   .temp {
+    padding: 0 10px;
     font-family: var(--font-display);
     font-size: 20px;
     font-weight: 600;
@@ -228,6 +287,7 @@
     align-items: flex-end;
     gap: 2px;
     height: 16px;
+    padding: 0 10px;
     opacity: var(--dim-secondary);
   }
 
@@ -242,6 +302,10 @@
   }
 
   .clock {
+    /* Nothing on the right: the header's own padding is the margin
+       to the screen edge, and doubling it would push the clock in
+       from where the title sits opposite. */
+    padding-left: 10px;
     font-family: var(--font-display);
     font-size: 24px;
     font-weight: 600;

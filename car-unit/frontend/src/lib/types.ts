@@ -20,6 +20,23 @@ export const NAV: NavItem[] = [
   { href: '/camera', label: 'Camera', icon: 'camera' },
 ]
 
+/** Settings sections, in rail order. Each is a route so a link can
+ *  point straight at one -- the Bluetooth badge goes to
+ *  /settings/connectivity. */
+export interface Section {
+  href: string
+  label: string
+}
+
+export const SETTINGS_SECTIONS: Section[] = [
+  { href: '/settings/display', label: 'Display' },
+  { href: '/settings/sound', label: 'Sound' },
+  { href: '/settings/connectivity', label: 'Connectivity' },
+  { href: '/settings/vehicle', label: 'Vehicle' },
+  { href: '/settings/driver-assist', label: 'Driver Assist' },
+  { href: '/settings/about', label: 'About' },
+]
+
 /** The four ambient colours. Stored as the canonical swatch hex;
  *  accentFor() resolves the per-theme contrast variant. */
 export const SWATCHES = ['#d8b146', '#1d4e91', '#b21f2d', '#7fe0a8']
