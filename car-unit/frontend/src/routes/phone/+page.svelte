@@ -5,8 +5,14 @@
 
   /* Placeholder throughout. Nothing is wired to the daemon. */
 
-  const favourites = ['Anna', 'Mamma', 'Erik', 'Astrid', 'Service']
-  let selected = $state('Anna')
+  const favourites = [
+    { short: 'Anna', name: 'Anna Lind' },
+    { short: 'Mamma', name: 'Mamma' },
+    { short: 'Erik', name: 'Erik Waller' },
+    { short: 'Astrid', name: 'Astrid Berg' },
+    { short: 'Service', name: 'Service' },
+  ]
+  let selected = $state('Anna Lind')
 
   const recent = [
     { name: 'Anna Lind', kind: 'Outgoing', when: 'Today · 12:04' },
@@ -66,10 +72,17 @@
 <div class="phone">
   <Card eyebrow="Favourites">
     <div class="people">
-      {#each favourites as name (name)}
-        <button class="favourite" onclick={() => (selected = name)}>
-          <Avatar {name} size={52} active={selected === name} />
-          <span class="name">{name}</span>
+      {#each favourites as person (person.name)}
+        <button
+          class="favourite"
+          onclick={() => (selected = person.name)}
+        >
+          <Avatar
+            name={person.name}
+            size={52}
+            active={selected === person.name}
+          />
+          <span class="name">{person.short}</span>
         </button>
       {/each}
     </div>
@@ -154,7 +167,10 @@
 <style>
   .phone {
     display: grid;
-    grid-template-rows: auto 1fr;
+    /* minmax(0, 1fr) rather than 1fr: a bare 1fr floors at the row's
+       min-content height, so the contacts list would push the page
+       taller than the screen instead of scrolling inside its card. */
+    grid-template-rows: auto minmax(0, 1fr);
     gap: var(--spacing-l);
     height: 100%;
     padding: var(--spacing-l);
@@ -190,6 +206,10 @@
   .columns {
     display: grid;
     grid-template-columns: 1fr 1fr 300px;
+    /* Declared, because an implicit row is auto -- sized to whichever
+       card is tallest. That was the whole bug: the cards grew to fit
+       the contacts rather than the contacts scrolling inside them. */
+    grid-template-rows: minmax(0, 1fr);
     gap: var(--spacing-l);
     min-height: 0;
   }
@@ -329,6 +349,9 @@
   .keys {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
+    /* Four equal rows sharing whatever the card gives, rather than
+       four auto rows each as tall as its key. */
+    grid-template-rows: repeat(4, minmax(0, 1fr));
     gap: 8px;
     flex: 1;
     min-height: 0;

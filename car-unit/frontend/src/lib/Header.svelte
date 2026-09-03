@@ -114,7 +114,9 @@
 <style>
   .bar {
     display: grid;
-    grid-template-columns: 1fr auto 1fr;
+    /* The title and status columns may shrink; the volume group in
+       the middle keeps its natural width. */
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
     align-items: center;
     height: 64px;
     padding: 0 24px;

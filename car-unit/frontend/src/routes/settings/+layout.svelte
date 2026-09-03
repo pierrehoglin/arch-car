@@ -44,7 +44,11 @@
 <style>
   .settings {
     display: grid;
-    grid-template-columns: 208px 1fr;
+    grid-template-columns: 208px minmax(0, 1fr);
+    /* auto, not 1fr: the panels are as tall as their cards and the
+       page scrolls past them, rather than each card stretching to
+       fill the screen. */
+    grid-template-rows: auto;
     gap: var(--spacing-l);
     height: 100%;
     padding: var(--spacing-l);

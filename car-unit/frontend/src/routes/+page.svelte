@@ -90,7 +90,9 @@
 <style>
   .dashboard {
     display: grid;
-    grid-template-rows: auto 1fr;
+    /* minmax(0, ...) so the tiles row can shrink: a bare 1fr floors
+       at min-content and would push the page past the screen. */
+    grid-template-rows: auto minmax(0, 1fr);
     gap: var(--spacing-l);
     height: 100%;
     padding: var(--spacing-l);
@@ -139,6 +141,7 @@
   .tiles {
     display: grid;
     grid-template-columns: 1fr 1fr;
+    grid-template-rows: minmax(0, 1fr);
     gap: var(--spacing-l);
     min-height: 0;
   }

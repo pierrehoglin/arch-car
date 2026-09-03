@@ -38,13 +38,12 @@ export const SETTINGS_SECTIONS: Section[] = [
 ]
 
 /** Media sources, each its own route. FM and USB have controls that
- *  have nothing to do with a Bluetooth player -- a frequency dial
- *  against a track list -- so they are pages, not a switch inside
- *  one. */
+ *  have nothing to do with a phone player -- a frequency dial against
+ *  a track list -- so they are pages, not a switch inside one. */
 export const MEDIA_SOURCES: Section[] = [
   { href: '/media/bluetooth', label: 'Bluetooth' },
+  { href: '/media/spotify', label: 'Spotify' },
   { href: '/media/fm', label: 'FM' },
-  { href: '/media/usb', label: 'USB' },
 ]
 
 /** The four ambient colours. Stored as the canonical swatch hex;

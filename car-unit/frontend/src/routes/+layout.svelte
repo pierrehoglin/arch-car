@@ -64,16 +64,34 @@
 </div>
 
 <style>
+  /* minmax(0, 1fr) throughout, not a bare 1fr.
+     
+     1fr means minmax(auto, 1fr), and auto as a minimum is min-content
+     -- so a track can never shrink below what its content demands. A
+     page with a long list then pushes the row taller than the screen
+     instead of scrolling inside it, which is what went wrong on the
+     phone screen.
+     
+     Stating the zero minimum fixes it without pinning anything to the
+     panel's size, so the layout still holds in a browser window at
+     some other dimension. */
   .shell {
     display: grid;
-    grid-template-columns: 120px 1fr;
-    height: 100%;
+    grid-template-columns: 120px minmax(0, 1fr);
+    /* The row has to be declared too. Without it the single implicit
+       row is auto -- sized to content -- so .main could never shrink
+       however many zero minimums were stated below it. */
+    grid-template-rows: minmax(0, 1fr);
+    /* dvh rather than a chain of height:100% from html down. One
+       broken link anywhere in that chain silently turns every
+       percentage into auto, and this is a kiosk filling the screen. */
+    height: 100dvh;
     background: var(--bg);
   }
 
   .main {
     display: grid;
-    grid-template-rows: 64px 1fr;
+    grid-template-rows: 64px minmax(0, 1fr);
     min-width: 0;
   }
 
