@@ -1,6 +1,7 @@
 <script lang="ts">
   import Icon from '$lib/Icon.svelte'
   import Avatar from '$lib/ui/Avatar.svelte'
+  import Card from '$lib/ui/Card.svelte'
 
   /* Placeholder throughout. Nothing is wired to the daemon. */
 
@@ -63,8 +64,7 @@
 </script>
 
 <div class="phone">
-  <section class="card favourites">
-    <div class="eyebrow">Favourites</div>
+  <Card eyebrow="Favourites">
     <div class="people">
       {#each favourites as name (name)}
         <button class="favourite" onclick={() => (selected = name)}>
@@ -73,11 +73,10 @@
         </button>
       {/each}
     </div>
-  </section>
+  </Card>
 
   <div class="columns">
-    <section class="card list">
-      <div class="eyebrow">Recent</div>
+    <Card eyebrow="Recent" gap="none" trim class="list">
       {#each recent as call (call.name + call.when)}
         <div class="call">
           <Avatar name={call.name} size={40} />
@@ -89,9 +88,9 @@
           </div>
         </div>
       {/each}
-    </section>
+    </Card>
 
-    <section class="card list">
+    <Card gap="none" class="list">
       <div class="head">
         <div class="eyebrow">Contacts</div>
         <label class="search">
@@ -121,10 +120,9 @@
           <p class="empty">No contacts match “{search}”</p>
         {/each}
       </div>
-    </section>
+    </Card>
 
-    <section class="card keypad">
-      <div class="eyebrow">Keypad</div>
+    <Card eyebrow="Keypad" gap="none" class="keypad">
 
       <div class="entry" class:empty={!dialled}>
         {dialled || 'Enter a number'}
@@ -149,7 +147,7 @@
         <Icon name="phone" size={19} />
         Call
       </button>
-    </section>
+    </Card>
   </div>
 </div>
 
@@ -157,22 +155,15 @@
   .phone {
     display: grid;
     grid-template-rows: auto 1fr;
-    gap: 24px;
+    gap: var(--spacing-l);
     height: 100%;
-    padding: 24px;
+    padding: var(--spacing-l);
     min-height: 0;
-  }
-
-  .card {
-    padding: 18px 22px;
-    background: var(--surface);
-    border-radius: var(--radius);
   }
 
   .people {
     display: flex;
     gap: 26px;
-    margin-top: 12px;
   }
 
   .favourite {
@@ -199,13 +190,14 @@
   .columns {
     display: grid;
     grid-template-columns: 1fr 1fr 300px;
-    gap: 24px;
+    gap: var(--spacing-l);
     min-height: 0;
   }
 
-  .list {
-    display: flex;
-    flex-direction: column;
+  /* :global because these land on the Card component's element. The
+     card owns its surface; the page owns how it fills the column. */
+  .columns :global(.list),
+  .columns :global(.keypad) {
     min-height: 0;
   }
 
@@ -213,7 +205,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 16px;
+    gap: var(--spacing);
   }
 
   .search {
@@ -249,8 +241,8 @@
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-    margin: 0 -22px;
-    padding: 0 22px;
+    margin: 0 calc(var(--spacing-l) * -1);
+    padding: 0 var(--spacing-l);
   }
 
   .call,
@@ -314,15 +306,9 @@
   }
 
   .empty {
-    padding: 20px 0;
+    padding: var(--spacing-l) 0;
     font-size: 14px;
     color: var(--text-faint);
-  }
-
-  .keypad {
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
   }
 
   .entry {
@@ -387,7 +373,7 @@
     justify-content: center;
     gap: 10px;
     height: 52px;
-    margin-top: 12px;
+    margin-top: var(--spacing-s);
     font-family: var(--font-display);
     font-size: 14px;
     font-weight: 600;

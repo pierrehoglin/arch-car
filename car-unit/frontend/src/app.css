@@ -14,6 +14,13 @@
   --radius: 20px;
   --radius-sm: 12px;
 
+  /* Spacing. Theme-independent, like the radii above. */
+  --spacing-xs: 8px;
+  --spacing-s: 12px;
+  --spacing: 16px;
+  --spacing-l: 20px;
+  --spacing-xl: 24px;
+
   /* Opacity applied to secondary/non-critical chrome; only overridden to a
      low value under Night Panel so primary readouts (e.g. the DriveView
      speed digit) stay legible while everything else recedes. */
@@ -131,6 +138,7 @@ button {
   color: var(--text-dim);
 }
 
+/* SvelteKit renders into this wrapper; see app.html. */
 #app {
   height: 100%;
 }

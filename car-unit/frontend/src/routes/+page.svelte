@@ -1,5 +1,6 @@
 <script lang="ts">
   import Icon from '$lib/Icon.svelte'
+  import Card from '$lib/ui/Card.svelte'
 
   /* Everything here is placeholder. Nothing is wired to the daemon. */
 
@@ -41,7 +42,8 @@
 </script>
 
 <div class="dashboard">
-  <section class="card summary">
+  <Card padding="xl" gap="none" direction="row" align="start"
+        justify="between">
     <div class="when">
       <div class="eyebrow">{greeting}</div>
       <div class="clock">{clock}</div>
@@ -56,11 +58,10 @@
       </div>
       <div class="eyebrow">{conditions}</div>
     </div>
-  </section>
+  </Card>
 
   <div class="tiles">
-    <a class="card tile" href="/media">
-      <div class="eyebrow">Now playing</div>
+    <Card href="/media" eyebrow="Now playing" justify="between">
       <div class="foot">
         <span class="thumb">
           <Icon name="note" size={26} />
@@ -70,10 +71,9 @@
           <span class="detail">{track.artist}</span>
         </span>
       </div>
-    </a>
+    </Card>
 
-    <a class="card tile" href="/map">
-      <div class="eyebrow">Navigation</div>
+    <Card href="/map" eyebrow="Navigation" justify="between">
       <div class="foot">
         <span class="thumb accent">
           <Icon name="map" size={26} />
@@ -83,7 +83,7 @@
           <span class="detail">Offline vector map · live position</span>
         </span>
       </div>
-    </a>
+    </Card>
   </div>
 </div>
 
@@ -91,21 +91,9 @@
   .dashboard {
     display: grid;
     grid-template-rows: auto 1fr;
-    gap: 24px;
+    gap: var(--spacing-l);
     height: 100%;
-    padding: 24px;
-  }
-
-  .card {
-    background: var(--surface);
-    border-radius: var(--radius);
-  }
-
-  .summary {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    padding: 26px 30px 28px;
+    padding: var(--spacing-l);
   }
 
   /* The clock is the one thing read at a glance from the driver's
@@ -136,7 +124,7 @@
   .weather {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: var(--spacing-s);
     color: var(--text-dim);
   }
 
@@ -151,28 +139,14 @@
   .tiles {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 24px;
+    gap: var(--spacing-l);
     min-height: 0;
-  }
-
-  .tile {
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    padding: 22px;
-    color: inherit;
-    text-decoration: none;
-  }
-
-  .tile:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: -2px;
   }
 
   .foot {
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: var(--spacing);
   }
 
   /* A block rather than a bare icon: the whole tile is the target,

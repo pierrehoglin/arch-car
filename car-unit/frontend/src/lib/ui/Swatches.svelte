@@ -36,7 +36,7 @@
 <style>
   .swatches {
     display: flex;
-    gap: 12px;
+    gap: var(--spacing-s);
   }
 
   .swatch {

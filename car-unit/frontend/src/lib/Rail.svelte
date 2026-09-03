@@ -31,7 +31,7 @@
         href={item.href}
         aria-current={active(item.href) ? 'page' : undefined}
       >
-        <Icon name={item.icon} />
+        <Icon name={item.icon} size={30} />
         <span class="label">{item.label}</span>
       </a>
     {/each}
@@ -43,7 +43,7 @@
     href="/settings"
     aria-current={active('/settings') ? 'page' : undefined}
   >
-    <Icon name="settings" />
+    <Icon name="settings" size={30} />
     <span class="label">Settings</span>
   </a>
 
@@ -60,7 +60,7 @@
        apart. */
     width: 100%;
     height: 100%;
-    padding: 0 0 10px;
+    padding: 0 0 var(--spacing-s);
     background: var(--rail);
     border-right: 1px solid var(--hairline);
   }
@@ -83,7 +83,7 @@
     display: flex;
     flex-direction: column;
     width: 100%;
-    margin-top: 6px;
+    margin-top: var(--spacing-s);
   }
 
   .item {
@@ -91,12 +91,12 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 6px;
+    gap: var(--spacing-s);
     width: 100%;
     /* Deliberately tall. Every one of these is pressed with a thumb
        while moving, so they are sized for that rather than for the
        amount of content in them. */
-    padding: 14px 0 12px;
+    padding: var(--spacing) 0 var(--spacing-s);
     color: var(--text-dim);
     text-decoration: none;
     opacity: var(--dim-secondary);
@@ -138,7 +138,7 @@
   }
 
   .model {
-    margin-top: 10px;
+    margin-top: var(--spacing-s);
     font-family: var(--font-display);
     font-size: 9px;
     font-weight: 600;

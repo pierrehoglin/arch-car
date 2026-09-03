@@ -155,7 +155,7 @@
     bottom: 28px;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--spacing-s);
   }
 
   .control {

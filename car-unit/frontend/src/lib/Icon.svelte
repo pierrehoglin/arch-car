@@ -19,7 +19,7 @@
   import type { Component } from 'svelte'
 
   import IconCamera from '~icons/tabler/camera'
-  import IconCar from '~icons/tabler/car'
+  import IconCar from '~icons/tabler/brand-speedtest'
   import IconCloud from '~icons/tabler/cloud'
   import IconCompass from '~icons/tabler/compass'
   import IconHeading from '~icons/tabler/navigation'

@@ -114,7 +114,7 @@
   .volume {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: var(--spacing-s);
     color: var(--text-dim);
     opacity: var(--dim-secondary);
   }
@@ -210,7 +210,7 @@
     display: flex;
     align-items: center;
     justify-content: flex-end;
-    gap: 16px;
+    gap: var(--spacing);
   }
 
   /* Same face and colour as the clock: both are glanced at from the

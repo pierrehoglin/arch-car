@@ -241,8 +241,8 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 16px;
-    padding: 12px 0;
+    gap: var(--spacing);
+    padding: var(--spacing-s) 0;
     font-size: 15px;
     color: var(--text-dim);
     border-bottom: 1px solid var(--hairline);

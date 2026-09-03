@@ -29,7 +29,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 24px;
+    gap: var(--spacing-xl);
     /* Tall enough to hit while moving, and the hairline sits between
        rows rather than around them so the card reads as one object. */
     min-height: 78px;

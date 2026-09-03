@@ -22,28 +22,30 @@
 </script>
 
 <div class="settings">
-  <nav class="sections" aria-label="Settings sections">
-    {#each sections as name (name)}
-      <button
-        class="section"
-        class:active={section === name}
-        onclick={() => (section = name)}
-        aria-current={section === name ? 'true' : undefined}
-      >
-        <span class="dot"></span>
-        {name}
-      </button>
-    {/each}
+  <Card padding="s" gap="none" class="sections">
+    <nav aria-label="Settings sections">
+      {#each sections as name (name)}
+        <button
+          class="section"
+          class:active={section === name}
+          onclick={() => (section = name)}
+          aria-current={section === name ? 'true' : undefined}
+        >
+          <span class="dot"></span>
+          {name}
+        </button>
+      {/each}
 
-    <button class="section close" onclick={() => goto('/')}>
-      <Icon name="power" size={17} />
-      Close
-    </button>
-  </nav>
+      <button class="section close" onclick={() => goto('/')}>
+        <Icon name="power" size={17} />
+        Close
+      </button>
+    </nav>
+  </Card>
 
   <div class="panels">
     {#if section === 'Display'}
-      <Card eyebrow="Display">
+      <Card eyebrow="Display" gap="none" trim>
         <Row title="Theme" detail="Light or dark instrument panel">
           <Segmented
             label="Theme"
@@ -74,7 +76,7 @@
         </Row>
       </Card>
 
-      <Card eyebrow="Screen">
+      <Card eyebrow="Screen" gap="none" trim>
         <Row title="Panel" detail="Waveshare 10.1 DSI touch">
           <Segmented
             label="Panel"
@@ -88,7 +90,7 @@
         </Row>
       </Card>
     {:else}
-      <Card eyebrow={section}>
+      <Card eyebrow={section} gap="none" trim>
         <Row title="Nothing here yet" detail="Coming in a later stage">
           <span class="pending">&mdash;</span>
         </Row>
@@ -101,25 +103,28 @@
   .settings {
     display: grid;
     grid-template-columns: 208px 1fr;
-    gap: 24px;
+    gap: var(--spacing-l);
     height: 100%;
-    padding: 24px;
+    padding: var(--spacing-l);
     overflow-y: auto;
   }
 
-  .sections {
+  /* align-self is how the card sits in the grid, not how it lays out
+     its own children, so it stays here rather than becoming a prop.
+     :global because the class lands on the Card's element. */
+  .settings :global(.sections) {
+    align-self: start;
+  }
+
+  nav {
     display: flex;
     flex-direction: column;
-    align-self: start;
-    padding: 14px;
-    background: var(--surface);
-    border-radius: var(--radius);
   }
 
   .section {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: var(--spacing-s);
     height: 47px;
     padding: 0 14px;
     font-size: 15px;
@@ -164,7 +169,7 @@
   .panels {
     display: flex;
     flex-direction: column;
-    gap: 24px;
+    gap: var(--spacing-l);
     align-content: start;
   }
 
