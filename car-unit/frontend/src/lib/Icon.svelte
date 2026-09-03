@@ -21,6 +21,8 @@
   import IconBluetooth from '~icons/tabler/bluetooth'
   import IconBluetoothOn from '~icons/tabler/bluetooth-connected'
   import IconCamera from '~icons/tabler/camera'
+  import IconChevronLeft from '~icons/tabler/chevron-left'
+  import IconChevronRight from '~icons/tabler/chevron-right'
   import IconCar from '~icons/tabler/brand-speedtest'
   import IconCloud from '~icons/tabler/cloud'
   import IconCompass from '~icons/tabler/compass'
@@ -35,6 +37,8 @@
   import IconPower from '~icons/tabler/power'
   import IconSearch from '~icons/tabler/search'
   import IconSettings from '~icons/tabler/settings'
+  import IconStar from '~icons/tabler/star'
+  import IconStarOn from '~icons/tabler/star-filled'
   import IconVolume from '~icons/tabler/volume'
   import IconVolumeOff from '~icons/tabler/volume-off'
 
@@ -60,6 +64,8 @@
     bluetooth: IconBluetooth,
     'bluetooth-connected': IconBluetoothOn,
     camera: IconCamera,
+    'chevron-left': IconChevronLeft,
+    'chevron-right': IconChevronRight,
     car: IconCar,
     cloud: IconCloud,
     compass: IconCompass,
@@ -78,6 +84,8 @@
     remove: IconMinus,
     search: IconSearch,
     settings: IconSettings,
+    star: IconStar,
+    'star-filled': IconStarOn,
     volume: IconVolume,
     muted: IconVolumeOff,
   }
