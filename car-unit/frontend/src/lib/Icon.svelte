@@ -21,6 +21,7 @@
   import IconBluetooth from '~icons/tabler/bluetooth'
   import IconBluetoothOn from '~icons/tabler/bluetooth-connected'
   import IconCamera from '~icons/tabler/camera'
+  import IconClose from '~icons/tabler/x'
   import IconChevronLeft from '~icons/tabler/chevron-left'
   import IconChevronRight from '~icons/tabler/chevron-right'
   import IconCar from '~icons/tabler/brand-speedtest'
@@ -64,6 +65,7 @@
     bluetooth: IconBluetooth,
     'bluetooth-connected': IconBluetoothOn,
     camera: IconCamera,
+    close: IconClose,
     'chevron-left': IconChevronLeft,
     'chevron-right': IconChevronRight,
     car: IconCar,
