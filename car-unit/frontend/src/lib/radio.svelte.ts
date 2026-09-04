@@ -1,5 +1,6 @@
 import * as fm from './api/fm'
 import { RequestFailed } from './api/client'
+import { connect, on, stream } from './api/stream.svelte'
 import { EMPTY_RADIO, type RadioState, type Signal, type Station } from './api/types'
 
 /* The radio, as one piece of state the screens share.
@@ -9,9 +10,12 @@ import { EMPTY_RADIO, type RadioState, type Signal, type Station } from './api/t
  * clamps the band, resolves preset names and decides what "play with
  * no argument" means, and second-guessing any of that here would put
  * two answers in the system.
+ *
+ * Updates arrive over the event stream rather than by polling. RDS
+ * fills in a couple of seconds after tuning and the supervisor can
+ * change the source at any moment, neither of which a two-second poll
+ * reports promptly -- and most polls would find nothing changed.
  */
-
-const POLL_MS = 2000
 
 interface Store {
   state: RadioState
@@ -116,30 +120,37 @@ export async function scan(identify = true): Promise<void> {
 }
 
 /**
- * Keep the state current while a screen is mounted.
+ * Follow the daemon.
  *
- * Polling rather than a subscription because RDS arrives gradually --
- * the station name and radiotext fill in over several seconds after
- * tuning, and there is no event to wait for.
+ * Opens the stream if it is not already open and subscribes to what
+ * the radio cares about. Returns an unsubscribe function, so an
+ * $effect can hand it straight back.
  *
- * Returns a stop function, so an $effect can hand it straight back.
+ * The stream sends current state on connecting, so a screen mounting
+ * halfway through a session is populated without also fetching.
  */
-export function watch(interval = POLL_MS): () => void {
-  let stopped = false
+export function watch(): () => void {
+  connect()
 
-  const tick = async () => {
-    if (stopped) return
-    /* Skipped while an action is in flight: that action is about to
-       set the state itself, and a poll landing after it would show a
-       reading from before the change. */
-    if (!radio.busy && !radio.scanning) await refresh()
-  }
-
-  tick()
-  const timer = setInterval(tick, interval)
+  const off = [
+    on('fm', (data) => {
+      /* Ignored while an action is in flight: that action is about to
+         set the state itself, and an event landing after it would
+         show a reading from before the change. */
+      if (!radio.busy) radio.state = data as RadioState
+    }),
+    on('presets', (data) => {
+      radio.presets = data as Station[]
+    }),
+    on('signals', (data) => {
+      radio.signals = data as Signal[]
+    }),
+  ]
 
   return () => {
-    stopped = true
-    clearInterval(timer)
+    for (const stop of off) stop()
   }
 }
+
+/** Whether readings are live, for a screen that wants to say so. */
+export const connection = () => stream.connection

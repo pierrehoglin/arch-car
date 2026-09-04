@@ -4,11 +4,16 @@
 export const ssr = false
 export const prerender = false
 
-/* Mirage stands in for the daemon while the screens are being built.
-   Guarded on DEV so it is stripped from the production bundle
-   entirely -- a mock server shipped to the car would silently answer
-   every request the daemon should have. */
+/* MSW stands in for the daemon while the screens are being built. It
+   intercepts through a Service Worker, so the app does real fetches
+   to real URLs and reads real status codes -- and mocked responses
+   appear in the Network tab.
+
+   Guarded on DEV and awaited, so the worker is intercepting before
+   any screen makes its first request, and so none of it reaches the
+   production bundle. A mock server shipped to the car would silently
+   answer every request the daemon should have. */
 if (import.meta.env.DEV) {
-  const { makeServer } = await import('$lib/mirage/server')
-  makeServer()
+  const { startMocking } = await import('$lib/mocks/browser')
+  await startMocking()
 }

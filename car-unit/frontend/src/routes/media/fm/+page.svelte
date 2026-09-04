@@ -4,29 +4,18 @@
   import Card from '$lib/ui/Card.svelte';
   import ScanDialog from '$lib/ui/ScanDialog.svelte';
   import Slider from '$lib/ui/Slider.svelte';
-  import {
-    loadPresets,
-    play,
-    radio,
-    savePreset,
-    seek,
-    toggle,
-    tune,
-    watch
-  } from '$lib/radio.svelte';
+  import { play, radio, savePreset, seek, toggle, tune, watch } from '$lib/radio.svelte';
 
   const BAND_MIN = 87.5;
   const BAND_MAX = 108.0;
 
   let scanOpen = $state(false);
 
-  /* Poll while this screen is mounted. RDS fills in over several
-     seconds after tuning, so the name and radiotext appear a moment
-     after the frequency does. */
-  $effect(() => {
-    loadPresets();
-    return watch();
-  });
+  /* Follow the daemon while this screen is mounted. The stream sends
+     current state on connecting, so there is nothing to fetch first
+     -- and RDS arriving a couple of seconds after a tune comes
+     through as its own event rather than being waited for. */
+  $effect(() => watch());
 
   const state = $derived(radio.state);
   const frequency = $derived(state.frequency ?? BAND_MIN);
