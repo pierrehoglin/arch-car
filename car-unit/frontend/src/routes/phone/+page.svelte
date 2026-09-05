@@ -29,7 +29,6 @@
     { name: 'Mamma', number: '070 234 56 78' },
   ]
 
-  let search = $state('')
   let dialled = $state('')
 
   const keys = [
@@ -43,17 +42,87 @@
     { digit: '8', letters: 'TUV' },
     { digit: '9', letters: 'WXYZ' },
     { digit: '*', letters: '' },
-    { digit: '0', letters: '+' },
+    /* Held rather than tapped, as on a phone. There is nowhere else
+       to put a plus without a key that does nothing most of the
+       time. */
+    { digit: '0', letters: '+', hold: '+' },
     { digit: '#', letters: '' },
   ]
 
+  /* Letters to the key they sit on, so what is typed can be matched
+     against names as well as numbers. Å and Ä ride with A, and Ö with
+     O, which is where a Nordic handset puts them. */
+  const T9: Record<string, string> = {}
+  for (const [digit, letters] of Object.entries({
+    '2': 'abcåä',
+    '3': 'def',
+    '4': 'ghi',
+    '5': 'jkl',
+    '6': 'mnoö',
+    '7': 'pqrs',
+    '8': 'tuv',
+    '9': 'wxyz',
+  })) {
+    for (const letter of letters) T9[letter] = digit
+  }
+
+  /** A word as the digits that would spell it. */
+  const encode = (text: string) =>
+    [...text.toLowerCase()]
+      .map((character) => T9[character] ?? '')
+      .join('')
+
+  /* Only the digits count for matching. A plus or a hash is part of
+     the number being dialled, not part of a search. */
+  const typed = $derived(dialled.replace(/\D/g, ''))
+
+  /**
+   * Contacts the keypad is pointing at.
+   *
+   * A name matches when any of its words begins with what was typed,
+   * so 5463 finds Lind without having to spell Anna first. A number
+   * matches anywhere inside it, since the part someone remembers is
+   * often the middle.
+   */
   const matching = $derived(
-    contacts.filter((c) =>
-      `${c.name} ${c.number}`
-        .toLowerCase()
-        .includes(search.trim().toLowerCase()),
-    ),
+    !typed
+      ? contacts
+      : contacts.filter((contact) => {
+          if (contact.number.replace(/\D/g, '').includes(typed)) return true
+          return contact.name
+            .split(/\s+/)
+            .some((word) => encode(word).startsWith(typed))
+        }),
   )
+
+  /** How long 0 must be held before it becomes a plus. */
+  const HOLD_MS = 500
+
+  let holdTimer: ReturnType<typeof setTimeout> | undefined
+  let held = false
+
+  function startHold(key: { digit: string; hold?: string }): void {
+    held = false
+    if (!key.hold) return
+
+    holdTimer = setTimeout(() => {
+      held = true
+      dialled += key.hold
+    }, HOLD_MS)
+  }
+
+  const endHold = () => clearTimeout(holdTimer)
+
+  /* On click rather than pointerup, so a key still works from a
+     keyboard. The flag is set by the hold and cleared here, since
+     click always follows the pointer events that raised it. */
+  function press(key: { digit: string }): void {
+    if (held) {
+      held = false
+      return
+    }
+    dialled += key.digit
+  }
 
   /* Grouped by first letter, with each letter shown once. Rebuilt on
      every filter so the headings never outlive their contacts. */
@@ -103,18 +172,17 @@
       {/each}
     </Card>
 
+    <!-- No search field: the keypad filters this list, as on a
+         handset. A second way in would only raise the question of
+         which one is filtering. -->
     <Card gap="none" class="list">
       <div class="head">
-        <div class="eyebrow">Contacts</div>
-        <label class="search">
-          <Icon name="search" size={16} />
-          <input
-            type="search"
-            placeholder="Search"
-            bind:value={search}
-            aria-label="Search contacts"
-          />
-        </label>
+        <span class="eyebrow">Contacts</span>
+        {#if typed}
+          <span class="filtered">
+            {matching.length} of {contacts.length}
+          </span>
+        {/if}
       </div>
 
       <div class="scroll">
@@ -130,28 +198,50 @@
             </button>
           {/each}
         {:else}
-          <p class="empty">No contacts match “{search}”</p>
+          <p class="empty">
+            No contacts match {dialled}
+          </p>
         {/each}
       </div>
     </Card>
 
     <Card eyebrow="Keypad" gap="none" class="keypad">
 
-      <div class="entry" class:empty={!dialled}>
-        {dialled || 'Enter a number'}
+      <div class="entry">
+        <span class="dialled" class:empty={!dialled}>
+          {dialled || 'Enter a number'}
+        </span>
+
+        {#if dialled}
+          <button
+            class="erase"
+            aria-label="Delete last digit"
+            onclick={() => (dialled = dialled.slice(0, -1))}
+          >
+            <Icon name="backspace" size={20} />
+          </button>
+        {/if}
       </div>
 
       <div class="keys">
         {#each keys as key (key.digit)}
           <button
             class="key"
-            onclick={() => (dialled += key.digit)}
-            aria-label={key.digit}
+            aria-label={key.hold
+              ? `${key.digit}, hold for ${key.hold}`
+              : key.digit}
+            onclick={() => press(key)}
+            onpointerdown={() => startHold(key)}
+            onpointerup={endHold}
+            onpointerleave={endHold}
+            onpointercancel={endHold}
+            oncontextmenu={(e) => e.preventDefault()}
           >
             <span class="digit">{key.digit}</span>
-            {#if key.letters}
-              <span class="letters">{key.letters}</span>
-            {/if}
+            <!-- A blank line rather than none, so 1, * and # are the
+                 same height as the rest and their digits sit on the
+                 same baseline. -->
+            <span class="letters">{key.letters || ' '}</span>
           </button>
         {/each}
       </div>
@@ -221,41 +311,8 @@
     min-height: 0;
   }
 
-  .head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--spacing);
-  }
 
-  .search {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--text-faint);
-  }
 
-  .search input {
-    width: 120px;
-    padding: 6px 0;
-    font: inherit;
-    font-size: 14px;
-    color: var(--text);
-    background: none;
-    border: 0;
-  }
-
-  .search input::placeholder {
-    color: var(--text-faint);
-  }
-
-  .search input:focus {
-    outline: none;
-  }
-
-  .search:focus-within {
-    color: var(--accent);
-  }
 
   .scroll {
     flex: 1;
@@ -316,6 +373,22 @@
     color: var(--danger);
   }
 
+  .head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--spacing-s);
+    padding-bottom: var(--spacing-xs);
+  }
+
+  /* Only while the keypad is filtering, so the heading is not
+     carrying a count that never changes. */
+  .filtered {
+    font-size: 12px;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+  }
+
   .letter {
     padding: 14px 0 4px;
     font-family: var(--font-display);
@@ -331,19 +404,52 @@
     color: var(--text-faint);
   }
 
+  /* A fixed height, and the prompt set in the same size as the
+     digits. Sizing it to its contents meant the keypad below moved
+     down the moment the first digit was pressed. */
   .entry {
-    padding: 14px 0 12px;
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    height: 54px;
+    padding: 0;
+  }
+
+  .dialled {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
     font-family: var(--font-display);
     font-size: 22px;
     font-variant-numeric: tabular-nums;
     letter-spacing: 0.04em;
+    white-space: nowrap;
+    text-overflow: ellipsis;
   }
 
-  .entry.empty {
-    font-family: var(--font-body);
-    font-size: 15px;
-    letter-spacing: 0;
+  .dialled.empty {
     color: var(--text-faint);
+    letter-spacing: 0;
+  }
+
+  .erase {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    color: var(--text-dim);
+    background: none;
+    border: 0;
+    border-radius: 50%;
+  }
+
+  .erase:active {
+    background: var(--panel-2);
+  }
+
+  .erase:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
   }
 
   .keys {
@@ -384,8 +490,13 @@
     font-weight: 600;
   }
 
+  /* Present on every key, blank where there are no letters, so the
+     digits line up across the pad instead of the unlettered ones
+     floating in the middle of their button. */
   .letters {
+    height: 12px;
     font-size: 9px;
+    line-height: 12px;
     letter-spacing: 0.14em;
     color: var(--text-faint);
   }
