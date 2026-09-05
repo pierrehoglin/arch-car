@@ -85,14 +85,16 @@
     <div class="query">
       <Icon name="search" size={20} />
 
-      <!-- readonly, so the panel's browser never tries to open a
-           keyboard of its own -- but still a real input, which is
-           what gives it a caret for the arrow keys to move. -->
+      <!-- Editable, not readonly: browsers will not place a caret in
+           a readonly field on a touch screen, and the caret is the
+           whole point of it being a real input. inputmode="none"
+           keeps the caret while telling the browser not to raise a
+           keyboard of its own. -->
       <input
         bind:this={field}
         bind:value={query}
         type="text"
-        readonly
+        inputmode="none"
         placeholder="Search places..."
         aria-label="Search places"
         autocomplete="off"
@@ -160,14 +162,19 @@
        shape. -->
   <!-- Given the field itself, so edits land at the caret rather than
        on the end of a string -- which is what makes the arrow keys
-       mean anything. -->
+       mean anything.
+       
+       No onchange: the keyboard dispatches a real input event, so
+       bind:value above already hears every edit. Taking the value
+       through a callback as well would be two paths to the same
+       state, and they would disagree the moment one of them was
+       changed. -->
   {#if typing}
     <Keyboard
       initial={query}
       label="Search places"
       target={field}
       maxlength={64}
-      onchange={(value) => (query = value)}
       ondone={() => (typing = false)}
       oncancel={() => (typing = false)}
     />

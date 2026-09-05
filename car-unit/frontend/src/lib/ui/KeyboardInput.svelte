@@ -23,9 +23,6 @@
     label: string
     placeholder?: string
     maxlength?: number
-    /** Apply every keystroke rather than waiting for Done. For a
-     *  field that stays visible above the sheet. */
-    live?: boolean
     onchange: (value: string) => void
   }
 
@@ -34,7 +31,6 @@
     label,
     placeholder = '',
     maxlength = 24,
-    live = false,
     onchange,
   }: Props = $props()
 
@@ -52,12 +48,17 @@
 </div>
 
 {#if open}
+  <!-- No target, so the keyboard renders its own buffer above the
+       keys. That is the right shape here: the field this pairs with
+       is a plain one on a screen, and the sheet usually covers it.
+       
+       A field that stays visible while typing -- the map's search --
+       wants the other shape, and uses Keyboard directly with its own
+       input as the target. -->
   <Keyboard
     initial={value}
     {label}
     {maxlength}
-    {live}
-    onchange={(next) => live && onchange(next)}
     ondone={(next) => {
       onchange(next)
       open = false

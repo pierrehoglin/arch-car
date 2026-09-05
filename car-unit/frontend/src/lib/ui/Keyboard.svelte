@@ -53,7 +53,14 @@
   $effect(() => {
     /* Focus so the caret shows and the browser keeps a selection for
        us to insert at. The panel has no hardware keyboard, so nothing
-       else will put focus here. */
+       else will put focus here.
+       
+       The field is editable rather than readonly: a readonly input is
+       selectable but not editable, and browsers will not place a
+       caret in one on a touch screen -- there is nothing to point at.
+       inputmode="none" keeps the caret while telling the browser not
+       to raise a keyboard of its own, which is what readonly was
+       reaching for. */
     field()?.focus()
   })
 
@@ -64,6 +71,13 @@
     input.value = next
     input.setSelectionRange(caret, caret)
     input.focus()
+
+    /* Setting .value from script does not fire an input event, so a
+       bind:value on the caller's field would never hear about it --
+       and would then write its own stale value back over ours, taking
+       the caret to the end with it. Dispatching one keeps the binding
+       in step without a second source of truth. */
+    input.dispatchEvent(new Event('input', { bubbles: true }))
 
     value = next
     onchange?.(next)
@@ -247,7 +261,7 @@
         aria-label={label}
         autocomplete="off"
         spellcheck="false"
-        readonly
+        inputmode="none"
         oninput={(e) => (value = e.currentTarget.value)}
       />
     </div>
@@ -379,8 +393,6 @@
     color: var(--text-dim);
   }
 
-  /* readonly, so the browser shows a caret and honours a selection
-     without ever opening a keyboard of its own. */
   .buffer input {
     width: 100%;
     padding: 0;
