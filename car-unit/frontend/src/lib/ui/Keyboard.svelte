@@ -133,13 +133,49 @@
     input.focus()
   }
 
+  /* Whichever way it ends, it ends once. Blur, Escape, Done and
+     Cancel can all arrive together -- dismissing by tapping elsewhere
+     fires blur and whatever was tapped -- and without this the second
+     one acts on a keyboard that has already gone. */
+  let dismissed = false
+
+  function finish(next: string): void {
+    if (dismissed) return
+    dismissed = true
+    ondone(next)
+  }
+
   /* Live mode has already changed the field by the time Cancel is
      pressed, so cancelling has to put it back. Buffered mode has
      nothing to undo -- that is the point of the buffer. */
   function cancel(): void {
+    if (dismissed) return
+    dismissed = true
     if (live) apply(initial, initial.length)
     oncancel()
   }
+
+  /* Focus leaving the field closes the keyboard -- it is no longer
+     driving anything.
+     
+     This only works because the keys do not take focus: see the
+     mousedown handler on the sheet. Without that, every keypress
+     would blur the field and shut the keyboard on the first letter.
+     
+     Treated as done rather than cancel, because the way focus usually
+     leaves is by tapping the thing you were typing towards -- a
+     search result, the Save button -- and throwing the text away at
+     that moment would be the opposite of what was asked. */
+  $effect(() => {
+    const input = field()
+    if (!input) return
+
+    // Trimmed, as Done does -- the two ways of finishing
+    // should not disagree about trailing spaces.
+    const left = () => finish(input.value.trim())
+    input.addEventListener('blur', left)
+    return () => input.removeEventListener('blur', left)
+  })
 
   let shifted = $state(true)
   let symbols = $state(false)
@@ -191,7 +227,11 @@
   })
 </script>
 
-<div class="keyboard">
+<!-- Focus never leaves the field. preventDefault on mousedown stops
+     the browser moving it to the button, which keeps the caret where
+     it is and means a blur is always something outside the keyboard
+     taking over. click still fires, so the keys work as normal. -->
+<div class="keyboard" onmousedown={(e) => e.preventDefault()}>
   <!-- Hidden in live mode: the caller's field is showing this
        already, and two copies of the same text invite the question of
        which one is real. -->
@@ -295,7 +335,7 @@
 
       <button class="key cancel" onclick={cancel}>Cancel</button>
 
-      <button class="key done" onclick={() => ondone(value.trim())}>
+      <button class="key done" onclick={() => finish(value.trim())}>
         Done
       </button>
     </div>
