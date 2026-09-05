@@ -1,37 +1,57 @@
 <script lang="ts">
-  import Icon from '$lib/Icon.svelte';
-  import Button from '$lib/ui/Button.svelte';
-  import Card from '$lib/ui/Card.svelte';
-  import ScanDialog from '$lib/ui/ScanDialog.svelte';
-  import Slider from '$lib/ui/Slider.svelte';
-  import { play, radio, savePreset, seek, toggle, tune, watch } from '$lib/radio.svelte';
+  import Icon from '$lib/Icon.svelte'
+  import Button from '$lib/ui/Button.svelte'
+  import Card from '$lib/ui/Card.svelte'
+  import PresetDialog from '$lib/ui/PresetDialog.svelte'
+  import ScanDialog from '$lib/ui/ScanDialog.svelte'
+  import Sortable from '$lib/ui/Sortable.svelte'
+  import Slider from '$lib/ui/Slider.svelte'
+  import {
+    play,
+    radio,
+    reorderPresets,
+    savePreset,
+    seek,
+    toggle,
+    tune,
+    watch,
+  } from '$lib/radio.svelte'
+  import type { Station } from '$lib/api/types'
 
-  const BAND_MIN = 87.5;
-  const BAND_MAX = 108.0;
+  const BAND_MIN = 87.5
+  const BAND_MAX = 108.0
 
-  let scanOpen = $state(false);
+  let scanOpen = $state(false)
+
+  /* The preset being edited, or null. Holding a chip opens this;
+     holding and dragging reorders instead. */
+  let editing = $state<Station | null>(null)
 
   /* Follow the daemon while this screen is mounted. The stream sends
      current state on connecting, so there is nothing to fetch first
      -- and RDS arriving a couple of seconds after a tune comes
      through as its own event rather than being waited for. */
-  $effect(() => watch());
+  $effect(() => watch())
 
-  const state = $derived(radio.state);
-  const frequency = $derived(state.frequency ?? BAND_MIN);
-  const rds = $derived(state.rds);
+  const state = $derived(radio.state)
+  const frequency = $derived(state.frequency ?? BAND_MIN)
+  const rds = $derived(state.rds)
 
-  const position = $derived(((frequency - BAND_MIN) / (BAND_MAX - BAND_MIN)) * 100);
+  const position = $derived(
+    ((frequency - BAND_MIN) / (BAND_MAX - BAND_MIN)) * 100,
+  )
 
-  const preset = $derived(radio.presets.find((p) => Math.abs(p.frequency - frequency) < 0.01));
+  const preset = $derived(
+    radio.presets.find((p) => Math.abs(p.frequency - frequency) < 0.01),
+  )
 
   /* Prefer what the station calls itself over what we saved it as:
      the preset name is a label, the PS is the broadcaster's own. */
-  const name = $derived(rds.ps || preset?.name || state.name);
+  const name = $derived(rds.ps || preset?.name || state.name)
 
   /* Ticks on the band come from the last scan, so an unscanned band
      is simply blank rather than showing invented stations. */
-  const found = $derived(radio.signals.map((s) => s.frequency));
+  const found = $derived(radio.signals.map((s) => s.frequency))
 </script>
 
 <div class="tuner">
@@ -80,7 +100,11 @@
     <Icon name="previous" size={22} />
   </button>
 
-  <button class="round primary" aria-label={state.paused ? 'Play' : 'Pause'} onclick={toggle}>
+  <button
+    class="round primary"
+    aria-label={state.paused ? 'Play' : 'Pause'}
+    onclick={toggle}
+  >
     <Icon name={state.paused ? 'play' : 'pause'} size={30} />
   </button>
 
@@ -94,18 +118,30 @@
 </div>
 
 <Card eyebrow="Presets" gap="s" class="preset-card">
-  <div class="presets">
-    {#each radio.presets as item (item.frequency)}
-      <button
+  <!-- Hold a preset to edit it; hold and drag to reorder. Tapping
+       plays it. -->
+  <Sortable
+    class="presets"
+    items={radio.presets}
+    key={(item) => item.frequency}
+    onactivate={(item) => play(item.frequency)}
+    onhold={(item) => (editing = item)}
+    onreorder={(next) => reorderPresets(next)}
+    label={(item) =>
+      `${item.name || 'Preset'}, ${item.frequency.toFixed(1)} megahertz`}
+  >
+    {#snippet item(entry: Station)}
+      <div
         class="preset"
-        class:current={Math.abs(item.frequency - frequency) < 0.01}
-        onclick={() => play(item.frequency)}
+        class:current={Math.abs(entry.frequency - frequency) < 0.01}
       >
-        <span class="preset-name">{item.name}</span>
-        <span class="preset-frequency">{item.frequency.toFixed(1)}</span>
-      </button>
-    {/each}
-  </div>
+        <span class="preset-name">
+          {entry.name || entry.frequency.toFixed(1)}
+        </span>
+        <span class="preset-frequency">{entry.frequency.toFixed(1)}</span>
+      </div>
+    {/snippet}
+  </Sortable>
 
   <!-- Both of these act on what is playing rather than jumping
        somewhere, so they sit below the grid rather than in it. -->
@@ -130,6 +166,8 @@
 </Card>
 
 <ScanDialog open={scanOpen} onclose={() => (scanOpen = false)} />
+
+<PresetDialog preset={editing} onclose={() => (editing = null)} />
 
 <style>
   .tuner {
@@ -186,6 +224,7 @@
     max-width: 560px;
   }
 
+
   .radiotext {
     /* A fixed line: RadioText changes with the song, and letting it
        wrap would shift everything below it every few minutes. */
@@ -213,6 +252,11 @@
     color: var(--text-faint);
     font-variant-numeric: tabular-nums;
   }
+
+
+
+
+
 
   .transport {
     display: flex;
@@ -262,16 +306,18 @@
     max-width: 560px;
   }
 
-  /* A grid rather than a wrapping row. With eight presets of very
-     different name lengths, wrapping gave three ragged rows and left
-     the save button stranded on its own; fixed columns keep the
-     chips a consistent size and the rows even. */
-  .presets {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: var(--spacing-s);
+  /* Four columns rather than a wrapping row. With presets of very
+     different name lengths, wrapping gave three ragged rows; fixed
+     columns keep the chips a consistent size and the rows even.
+     
+     Sortable reads these as variables, since it owns the container. */
+  .preset-card :global(.presets) {
+    --columns: repeat(4, 1fr);
+    --gap: var(--spacing-s);
   }
 
+  /* Presentational: Sortable's slot is the control, and carries the
+     focus ring and the spoken label. */
   .preset {
     display: flex;
     flex-direction: column;
@@ -291,11 +337,6 @@
     color: var(--accent);
     border-color: var(--accent);
     background: var(--accent-soft);
-  }
-
-  .preset:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
   }
 
   /* Truncate rather than wrap: a two-line chip would make its row
@@ -322,6 +363,10 @@
     gap: var(--spacing-s);
   }
 
+
   /* A saved station gets the accent, so the state reads without the
      word that used to carry it. */
+
+
+
 </style>

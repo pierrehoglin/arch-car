@@ -1,12 +1,79 @@
 <script lang="ts">
   import Icon from '$lib/Icon.svelte'
+  import Keyboard from '$lib/ui/Keyboard.svelte'
+  import Spinner from '$lib/ui/Spinner.svelte'
+  import { MIN_CHARS, suggest } from '$lib/api/places'
+  import type { Address } from '$lib/api/types'
 
   /* The map itself is not here yet. This is the chrome that sits over
      it -- search, speed, and the controls -- so the layout is settled
      before MapLibre and the pmtiles archive are wired in. */
 
+  /** Long enough that the list is not rebuilt mid-word, short enough
+   *  that it still feels like it follows the typing. */
+  const DEBOUNCE_MS = 220
+
+  let field = $state<HTMLInputElement>()
   let query = $state('')
+  let typing = $state(false)
+
+  let results = $state<Address[]>([])
+  let searching = $state(false)
+  let chosen = $state<Address | null>(null)
+
   const speed = 40
+
+  /* Debounced, and the result of a stale request is thrown away.
+     Without the second part a slow reply for "kun" can land after a
+     quick one for "kungsgatan" and replace it. */
+  let sequence = 0
+
+  $effect(() => {
+    const text = query.trim()
+
+    if (text.length < MIN_CHARS) {
+      results = []
+      searching = false
+      return
+    }
+
+    const ticket = ++sequence
+    searching = true
+
+    const timer = setTimeout(async () => {
+      try {
+        const found = await suggest(text)
+        if (ticket === sequence) results = found
+      } catch {
+        if (ticket === sequence) results = []
+      } finally {
+        if (ticket === sequence) searching = false
+      }
+    }, DEBOUNCE_MS)
+
+    return () => clearTimeout(timer)
+  })
+
+  function choose(place: Address): void {
+    chosen = place
+    query = place.display_name
+    results = []
+    typing = false
+  }
+
+  /** The line worth reading first: a name, or the street. */
+  function title(place: Address): string {
+    if (place.name) return place.name
+    return [place.road, place.house_number].filter(Boolean).join(' ')
+  }
+
+  /** Everything after it, minus what the title already said. */
+  function detail(place: Address): string {
+    return place.display_name
+      .split(', ')
+      .filter((part) => part !== title(place))
+      .join(', ')
+  }
 </script>
 
 <div class="map">
@@ -14,15 +81,59 @@
     <p class="pending">Map</p>
   </div>
 
-  <form class="search" onsubmit={(e) => e.preventDefault()}>
-    <input
-      type="search"
-      placeholder="Search places..."
-      bind:value={query}
-      aria-label="Search places"
-    />
-    <button class="go" disabled={!query.trim()}>Go</button>
-  </form>
+  <div class="search">
+    <div class="query">
+      <Icon name="search" size={20} />
+
+      <!-- readonly, so the panel's browser never tries to open a
+           keyboard of its own -- but still a real input, which is
+           what gives it a caret for the arrow keys to move. -->
+      <input
+        bind:this={field}
+        bind:value={query}
+        type="text"
+        readonly
+        placeholder="Search places..."
+        aria-label="Search places"
+        autocomplete="off"
+        spellcheck="false"
+        onclick={() => (typing = true)}
+      />
+
+      {#if searching}
+        <Spinner size={18} label="Searching" />
+      {:else if query}
+        <button
+          class="clear"
+          aria-label="Clear"
+          onclick={() => {
+            query = ''
+            chosen = null
+            field?.focus()
+          }}
+        >
+          <Icon name="close" size={18} />
+        </button>
+      {/if}
+    </div>
+
+    <button class="go" disabled={!chosen}>Go</button>
+
+    {#if results.length}
+      <ul class="results">
+        {#each results as place (place.osm_id)}
+          <li>
+            <button class="result" onclick={() => choose(place)}>
+              <span class="result-title">{title(place)}</span>
+              <span class="result-detail">{detail(place)}</span>
+            </button>
+          </li>
+        {/each}
+      </ul>
+    {:else if query.trim().length >= MIN_CHARS && !searching}
+      <p class="empty">Nothing found</p>
+    {/if}
+  </div>
 
   <div class="speed">
     <span class="figure">{speed}</span>
@@ -42,6 +153,25 @@
   </div>
 
   <p class="attribution">© OpenStreetMap contributors</p>
+
+  <!-- Live, so suggestions can follow the typing. The field stays
+       visible above the sheet, which is what makes that worth doing;
+       for a field the keyboard covers, the buffer is the better
+       shape. -->
+  <!-- Given the field itself, so edits land at the caret rather than
+       on the end of a string -- which is what makes the arrow keys
+       mean anything. -->
+  {#if typing}
+    <Keyboard
+      initial={query}
+      label="Search places"
+      target={field}
+      maxlength={64}
+      onchange={(value) => (query = value)}
+      ondone={() => (typing = false)}
+      oncancel={() => (typing = false)}
+    />
+  {/if}
 </div>
 
 <style>
@@ -80,25 +210,124 @@
     gap: 10px;
   }
 
-  .search input {
+  .query {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-s);
     width: 380px;
     height: 46px;
-    padding: 0 18px;
-    font: inherit;
-    font-size: 16px;
-    color: var(--text);
-    background: color-mix(in srgb, var(--bar) 88%, transparent);
+    padding: 0 var(--spacing);
+    color: var(--text-dim);
+    background: color-mix(in srgb, var(--bar) 94%, transparent);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
   }
 
-  .search input::placeholder {
+  .query:focus-within {
+    border-color: var(--accent);
+  }
+
+  .query input {
+    flex: 1;
+    min-width: 0;
+    padding: 0;
+    font-family: var(--font-body);
+    font-size: 16px;
+    color: var(--text);
+    background: none;
+    border: 0;
+    caret-color: var(--accent);
+  }
+
+  .query input::placeholder {
     color: var(--text-faint);
   }
 
-  .search input:focus-visible {
+  .query input:focus {
+    outline: none;
+  }
+
+  .clear {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    color: var(--text-dim);
+    background: none;
+    border: 0;
+    border-radius: 50%;
+  }
+
+  /* Under the field, over the map. Capped so a long list does not
+     reach the keyboard, which occupies the lower half of the screen
+     while this is being typed into. */
+  .results {
+    position: absolute;
+    top: 54px;
+    left: 0;
+    width: 380px;
+    max-height: 300px;
+    margin: 0;
+    padding: 0;
+    overflow-y: auto;
+    list-style: none;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+  }
+
+  .result {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    width: 100%;
+    min-height: 62px;
+    padding: var(--spacing-s) var(--spacing);
+    text-align: left;
+    background: none;
+    border: 0;
+    border-bottom: 1px solid var(--hairline);
+  }
+
+  li:last-child .result {
+    border-bottom: 0;
+  }
+
+  .result:active {
+    background: var(--panel-2);
+  }
+
+  .result:focus-visible {
     outline: 2px solid var(--accent);
-    outline-offset: 1px;
+    outline-offset: -2px;
+  }
+
+  .result-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .result-detail {
+    font-size: 12.5px;
+    color: var(--text-dim);
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .empty {
+    position: absolute;
+    top: 54px;
+    left: 0;
+    width: 380px;
+    margin: 0;
+    padding: var(--spacing);
+    font-size: 14px;
+    color: var(--text-faint);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
   }
 
   .go {

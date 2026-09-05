@@ -47,6 +47,22 @@ export const savePreset = (frequency: number, name = '') =>
 export const forgetPreset = (frequency: number) =>
   request<Station[]>(`/fm/presets/${frequency}`, { method: 'DELETE' })
 
+/**
+ * Replace the whole preset list, in order.
+ *
+ * The whole list rather than a move: a reorder is one intent, and
+ * sending it as a sequence of moves would leave the daemon holding a
+ * half-applied order if one failed.
+ *
+ * Note that carlib currently sorts presets by frequency when it saves
+ * them, so an order set here will not survive until that changes.
+ */
+export const reorderPresets = (stations: Station[]) =>
+  request<Station[]>('/fm/presets/order', {
+    method: 'PUT',
+    body: { presets: stations },
+  })
+
 /** What the last scan found, without sweeping again. */
 export const signals = () => request<Signal[]>('/fm/signals')
 

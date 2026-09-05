@@ -100,10 +100,28 @@ export function byName(name: string): number | null {
 }
 
 export function savePreset(frequency: number, name: string): Station[] {
-  presets = [
-    ...presets.filter((p) => Math.abs(p.frequency - frequency) > 0.01),
-    { frequency, name },
-  ].sort((a, b) => a.frequency - b.frequency)
+  const at = presets.findIndex(
+    (p) => Math.abs(p.frequency - frequency) < 0.01,
+  )
+
+  /* Order is the user's, so an existing preset keeps its place and a
+     new one goes on the end. Sorting by frequency here -- which
+     carlib currently does -- would throw away a reorder on the next
+     rename. */
+  if (at === -1) {
+    presets = [...presets, { frequency, name }]
+  } else {
+    presets = presets.map((p, index) =>
+      index === at ? { frequency, name } : p,
+    )
+  }
+
+  emit('presets', presets)
+  return presets
+}
+
+export function reorderPresets(next: Station[]): Station[] {
+  presets = [...next]
   emit('presets', presets)
   return presets
 }

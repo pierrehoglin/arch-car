@@ -91,6 +91,21 @@ export async function savePreset(frequency: number, name = ''): Promise<void> {
   }
 }
 
+export async function reorderPresets(stations: Station[]): Promise<void> {
+  /* Applied straight away rather than waiting for the response: the
+     list is already under the user's finger, and having it snap back
+     for a moment would read as the drag having failed. */
+  const previous = radio.presets
+  radio.presets = stations
+
+  try {
+    radio.presets = await fm.reorderPresets(stations)
+  } catch (cause) {
+    radio.presets = previous
+    report(cause)
+  }
+}
+
 export async function forgetPreset(frequency: number): Promise<void> {
   try {
     radio.presets = await fm.forgetPreset(frequency)

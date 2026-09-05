@@ -1,5 +1,7 @@
 import { HttpResponse, http } from 'msw'
 import * as device from './device'
+import type { Address, Station } from '../api/types'
+import { PLACES, type Place } from './fixtures'
 import { stream } from './stream'
 
 /* Stands in for the daemon.
@@ -31,8 +33,97 @@ async function body<T>(request: Request): Promise<T> {
   }
 }
 
+/** A fixture as the geocoder would return it. */
+function asAddress(place: Place): Address {
+  const parts = [
+    place.name || [place.road, place.house_number].filter(Boolean).join(' '),
+    place.postcode,
+    place.city,
+    place.county,
+    'Sverige',
+  ].filter(Boolean)
+
+  return {
+    display_name: parts.join(', '),
+    latitude: place.latitude,
+    longitude: place.longitude,
+    name: place.name,
+    house_number: place.house_number ?? '',
+    road: place.road ?? '',
+    neighbourhood: '',
+    suburb: '',
+    postcode: place.postcode ?? '',
+    city: place.city,
+    municipality: '',
+    county: place.county,
+    state: place.county,
+    country: 'Sverige',
+    country_code: 'SE',
+    category: 'place',
+    kind: place.kind,
+    osm_id: String(Math.abs(hash(place.city + place.name + (place.road ?? '')))),
+  }
+}
+
+/* Matched loosely and case-insensitively, on every word of the query
+   independently. Real geocoders are far cleverer, but the point here
+   is a list that narrows as you type, which this does. */
+function matching(query: string): Place[] {
+  const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
+  if (!words.length) return []
+
+  return PLACES.filter((place) => {
+    const haystack = [
+      place.name,
+      place.road,
+      place.house_number,
+      place.postcode,
+      place.city,
+      place.county,
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+
+    return words.every((word) => haystack.includes(word))
+  })
+}
+
+function hash(text: string): number {
+  let value = 0
+  for (const character of text) {
+    value = (value * 31 + character.charCodeAt(0)) | 0
+  }
+  return value
+}
+
 export const handlers = [
   stream,
+
+  http.get('/api/geocode/suggest', async ({ request }) => {
+    const url = new URL(request.url)
+    const query = url.searchParams.get('q') ?? ''
+    const limit = Number(url.searchParams.get('limit') ?? 6)
+
+    /* Short queries answer empty rather than everything, which is
+       what the daemon does -- two characters match half the country
+       and a request for them is wasted. */
+    if (query.trim().length < 3) return HttpResponse.json([])
+
+    /* Quicker than the other endpoints: this one runs on every
+       keystroke, and a search that lags behind the typing feels
+       broken however fast the results are. */
+    await wait(160)
+    return HttpResponse.json(matching(query).slice(0, limit).map(asAddress))
+  }),
+
+  http.get('/api/geocode/search', async ({ request }) => {
+    const url = new URL(request.url)
+    const query = url.searchParams.get('q') ?? ''
+    const limit = Number(url.searchParams.get('limit') ?? 5)
+    await wait(NORMAL_MS)
+    return HttpResponse.json(matching(query).slice(0, limit).map(asAddress))
+  }),
 
   http.get('/api/health', async () => {
     await wait(NORMAL_MS)
@@ -95,6 +186,12 @@ export const handlers = [
       await body<{ frequency: number; name?: string }>(request)
     await wait(NORMAL_MS)
     return HttpResponse.json(device.savePreset(frequency, name))
+  }),
+
+  http.put('/api/fm/presets/order', async ({ request }) => {
+    const { presets = [] } = await body<{ presets: Station[] }>(request)
+    await wait(NORMAL_MS)
+    return HttpResponse.json(device.reorderPresets(presets))
   }),
 
   http.delete('/api/fm/presets/:frequency', async ({ params }) => {

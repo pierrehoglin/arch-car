@@ -50,30 +50,37 @@
     if (dismissable && e.target === element) onclose()
   }}
 >
-  <div class="panel">
-    <header>
-      <h2 id="dialog-title">{title}</h2>
+  <!-- Unmounted when closed, not merely hidden. A native <dialog>
+       only stops painting, so its children stay mounted with their
+       state, their effects and their timers -- and anything they had
+       opened is still open the next time it appears. -->
+  {#if open}
+    <div class="panel">
+      <header>
+        <h2 id="dialog-title">{title}</h2>
 
-      <!-- Hidden while something is running, alongside the backdrop
-           and Escape being disabled: all three are the same rule, and
-           a close button that does nothing is worse than none. -->
-      {#if dismissable}
-        <button class="close" aria-label="Close" onclick={onclose}>
-          <Icon name="close" size={22} />
-        </button>
+        <!-- Hidden while something is running, alongside the backdrop
+             and Escape being disabled: all three are the same rule,
+             and a close button that does nothing is worse than
+             none. -->
+        {#if dismissable}
+          <button class="close" aria-label="Close" onclick={onclose}>
+            <Icon name="close" size={22} />
+          </button>
+        {/if}
+      </header>
+
+      <div class="body">
+        {@render children()}
+      </div>
+
+      {#if footer}
+        <footer>
+          {@render footer()}
+        </footer>
       {/if}
-    </header>
-
-    <div class="body">
-      {@render children()}
     </div>
-
-    {#if footer}
-      <footer>
-        {@render footer()}
-      </footer>
-    {/if}
-  </div>
+  {/if}
 </dialog>
 
 <style>

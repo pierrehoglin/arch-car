@@ -78,3 +78,27 @@ export const EMPTY_RADIO: RadioState = {
   started: null,
   rds: EMPTY_RDS,
 }
+
+/** A geocoded place, mirroring carlib.location.geocoding.Address. */
+export interface Address {
+  display_name: string
+  latitude: number
+  longitude: number
+
+  name: string
+  house_number: string
+  road: string
+  neighbourhood: string
+  suburb: string
+  postcode: string
+  city: string
+  municipality: string
+  county: string
+  state: string
+  country: string
+  country_code: string
+
+  category: string
+  kind: string
+  osm_id: string
+}

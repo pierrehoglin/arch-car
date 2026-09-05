@@ -21,6 +21,11 @@
   import IconBluetooth from '~icons/tabler/bluetooth'
   import IconBluetoothOn from '~icons/tabler/bluetooth-connected'
   import IconCamera from '~icons/tabler/camera'
+  import IconArrowDown from '~icons/tabler/arrow-down'
+  import IconArrowLeft from '~icons/tabler/arrow-left'
+  import IconArrowRight from '~icons/tabler/arrow-right'
+  import IconArrowUp from '~icons/tabler/arrow-up'
+  import IconBackspace from '~icons/tabler/backspace'
   import IconClose from '~icons/tabler/x'
   import IconChevronLeft from '~icons/tabler/chevron-left'
   import IconChevronRight from '~icons/tabler/chevron-right'
@@ -37,6 +42,7 @@
   import IconPlus from '~icons/tabler/plus'
   import IconPower from '~icons/tabler/power'
   import IconSearch from '~icons/tabler/search'
+  import IconShift from '~icons/tabler/arrow-big-up'
   import IconSettings from '~icons/tabler/settings'
   import IconStar from '~icons/tabler/star'
   import IconStarOn from '~icons/tabler/star-filled'
@@ -65,6 +71,11 @@
     bluetooth: IconBluetooth,
     'bluetooth-connected': IconBluetoothOn,
     camera: IconCamera,
+    backspace: IconBackspace,
+    down: IconArrowDown,
+    left: IconArrowLeft,
+    right: IconArrowRight,
+    up: IconArrowUp,
     close: IconClose,
     'chevron-left': IconChevronLeft,
     'chevron-right': IconChevronRight,
@@ -86,6 +97,7 @@
     remove: IconMinus,
     search: IconSearch,
     settings: IconSettings,
+    shift: IconShift,
     star: IconStar,
     'star-filled': IconStarOn,
     volume: IconVolume,
