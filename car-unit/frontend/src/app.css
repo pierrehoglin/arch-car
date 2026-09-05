@@ -115,12 +115,61 @@
   box-sizing: border-box;
 }
 
+/* Scrollbars.
+ *
+ * Chrome on Linux draws the desktop one: wide, with a track and a
+ * border, and on a touch screen there is no cursor to grab it with
+ * anyway. It is only ever an indicator here, so it is thin, has no
+ * track, and sits in the colour the hairlines use.
+ *
+ * Both syntaxes: the standard properties, and the WebKit
+ * pseudo-elements which Chromium prefers where they are present. The
+ * two are set to match so it makes no difference which wins.
+ *
+ * `scrollbar-width: none` instead of `thin` hides them entirely,
+ * which is worth considering -- but a list that scrolls with nothing
+ * to say so is a list people do not scroll.
+ */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--text-faint) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--text-faint);
+  border-radius: 4px;
+}
+
+*::-webkit-scrollbar-thumb:active {
+  background: var(--text-dim);
+}
+
+/* Chromium reserves space for these and draws them on Linux; neither
+   is wanted. */
+*::-webkit-scrollbar-button,
+*::-webkit-scrollbar-corner {
+  display: none;
+}
+
 html,
 body {
   margin: 0;
   padding: 0;
   height: 100%;
   overflow: hidden;
+  /* A flick that runs out of list should not then drag the page.
+     Nothing above scrolls, so the only effect would be the rubber
+     band Chromium shows at the edge. */
+  overscroll-behavior: none;
   font-family: var(--font-body);
   background: var(--bg);
   color: var(--text);
