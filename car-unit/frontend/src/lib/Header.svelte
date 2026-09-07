@@ -84,7 +84,9 @@
   </div>
 
   <div class="status">
-    <span class="temp">{outside}°</span>
+    {#if outside !== null}
+      <span class="temp">{outside}°</span>
+    {/if}
 
     <a
       class="bluetooth"

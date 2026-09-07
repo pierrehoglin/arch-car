@@ -10,8 +10,15 @@ interface Status {
   bluetooth: boolean
   /** Cellular signal, 0 to 4. */
   bars: number
-  /** Outside temperature in Celsius. */
-  outside: number
+  /**
+   * Outside temperature, from the car's own sensor over CAN.
+   *
+   * Deliberately not the weather service's reading. They disagree --
+   * a forecast is for a municipality and the sensor is in the
+   * bumper -- and the one worth showing in the status bar is the car's,
+   * because it is the one that knows the road is about to freeze.
+   */
+  outside: number | null
 }
 
 export const status = $state<Status>({

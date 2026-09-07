@@ -1,7 +1,12 @@
 import { HttpResponse, http } from 'msw'
 import * as device from './device'
 import type { Address, Station } from '../api/types'
-import { PLACES, type Place } from './fixtures'
+import {
+  PLACES,
+  SAVED_PLACES,
+  makeForecast,
+  type Place,
+} from './fixtures'
 import { stream } from './stream'
 
 /* Stands in for the daemon.
@@ -99,6 +104,21 @@ function hash(text: string): number {
 
 export const handlers = [
   stream,
+
+  http.get('/api/places', async () => {
+    await wait(NORMAL_MS)
+    return HttpResponse.json(SAVED_PLACES)
+  }),
+
+  http.get('/api/weather', async ({ request }) => {
+    const url = new URL(request.url)
+    const place = url.searchParams.get('place') ?? 'current'
+    /* A forced refresh goes to the provider, so it takes as long as
+       the network does. Everything else is served from the daemon's
+       own cache. */
+    await wait(url.searchParams.get('refresh') ? 900 : NORMAL_MS)
+    return HttpResponse.json(makeForecast(place))
+  }),
 
   http.get('/api/geocode/suggest', async ({ request }) => {
     const url = new URL(request.url)

@@ -102,3 +102,103 @@ export interface Address {
   kind: string
   osm_id: string
 }
+
+/** A saved location, mirroring carlib.location.places.Place. */
+export interface Place {
+  name: string
+  latitude: number
+  longitude: number
+  altitude: number | null
+  /** Filled in by the geocoder when the place was saved. */
+  address: string
+}
+
+/** Reserved: wherever we are now, kept current as the car moves. */
+export const CURRENT_PLACE = 'current'
+
+/* Weather, mirroring carlib.weather.types.
+ *
+ * Deliberately coarse conditions: a finer set is harder to map onto
+ * consistently across providers, and for a dashboard the difference
+ * between light rain and rain is not worth a wrong icon.
+ */
+export type Condition =
+  | 'clear'
+  | 'partly-cloudy'
+  | 'cloudy'
+  | 'fog'
+  | 'drizzle'
+  | 'rain'
+  | 'sleet'
+  | 'snow'
+  | 'thunder'
+  | 'unknown'
+
+export interface Conditions {
+  /** ISO 8601, as the API sends it. */
+  time: string | null
+
+  temperature: number | null
+  feels_like: number | null
+  /** The forecast's own uncertainty, from the 10th and 90th
+   *  percentiles -- not a high and a low over a period. */
+  temperature_p10: number | null
+  temperature_p90: number | null
+  /** Actual extremes, for an entry covering a period. */
+  temperature_high: number | null
+  temperature_low: number | null
+
+  humidity: number | null
+  pressure: number | null
+  dew_point: number | null
+
+  wind_speed: number | null
+  wind_gust: number | null
+  wind_direction: number | null
+  wind_speed_p10: number | null
+  wind_speed_p90: number | null
+
+  cloud_cover: number | null
+  cloud_low: number | null
+  cloud_medium: number | null
+  cloud_high: number | null
+
+  uv_index: number | null
+  /** Metres. Reported by OpenWeather, not by MET. */
+  visibility: number | null
+
+  precipitation: number
+  precipitation_probability: number | null
+
+  condition: Condition
+  symbol: string
+  /** Hours this entry covers. 0 for an instantaneous reading. */
+  period_hours: number
+}
+
+export interface Day {
+  /** ISO date. */
+  date: string | null
+  high: number | null
+  low: number | null
+  precipitation: number
+  wind_max: number | null
+  condition: Condition
+  /** How many hourly entries went into it, so a partial day can say
+   *  so rather than looking like a quiet one. */
+  entries: number
+}
+
+export interface Forecast {
+  provider: string
+  latitude: number
+  longitude: number
+  altitude: number | null
+  updated: string | null
+  expires: string | null
+  current: Conditions | null
+  hourly: Conditions[]
+  daily: Day[]
+  /** Where this is the weather for. */
+  place: string
+}

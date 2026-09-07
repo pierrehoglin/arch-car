@@ -31,6 +31,11 @@
   import IconChevronRight from '~icons/tabler/chevron-right'
   import IconCar from '~icons/tabler/brand-speedtest'
   import IconCloud from '~icons/tabler/cloud'
+  import IconCloudFog from '~icons/tabler/cloud-fog'
+  import IconCloudRain from '~icons/tabler/cloud-rain'
+  import IconCloudSnow from '~icons/tabler/cloud-snow'
+  import IconCloudStorm from '~icons/tabler/cloud-storm'
+  import IconDrizzle from '~icons/tabler/droplet'
   import IconCompass from '~icons/tabler/compass'
   import IconHeading from '~icons/tabler/navigation'
   import IconHome from '~icons/tabler/home'
@@ -41,7 +46,9 @@
   import IconPhone from '~icons/tabler/phone'
   import IconPlus from '~icons/tabler/plus'
   import IconPower from '~icons/tabler/power'
+  import IconRefresh from '~icons/tabler/refresh'
   import IconSearch from '~icons/tabler/search'
+  import IconSun from '~icons/tabler/sun'
   import IconShift from '~icons/tabler/arrow-big-up'
   import IconSettings from '~icons/tabler/settings'
   import IconStar from '~icons/tabler/star'
@@ -81,6 +88,11 @@
     'chevron-right': IconChevronRight,
     car: IconCar,
     cloud: IconCloud,
+    'cloud-fog': IconCloudFog,
+    'cloud-rain': IconCloudRain,
+    'cloud-snow': IconCloudSnow,
+    'cloud-storm': IconCloudStorm,
+    droplet: IconDrizzle,
     compass: IconCompass,
     crosshair: IconLocate,
     heading: IconHeading,
@@ -95,7 +107,9 @@
     power: IconPower,
     previous: IconPrevious,
     remove: IconMinus,
+    refresh: IconRefresh,
     search: IconSearch,
+    sun: IconSun,
     settings: IconSettings,
     shift: IconShift,
     star: IconStar,

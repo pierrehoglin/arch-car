@@ -1,8 +1,11 @@
 <script lang="ts">
   import Icon from '$lib/Icon.svelte'
   import Card from '$lib/ui/Card.svelte'
+  import WeatherDialog from '$lib/ui/WeatherDialog.svelte'
+  import { iconFor, nameFor, watch, weather } from '$lib/weather.svelte'
 
-  /* Everything here is placeholder. Nothing is wired to the daemon. */
+  /* The clock and greeting are local. The weather comes from the
+     daemon; the media tile is still placeholder. */
 
   let now = $state(new Date())
 
@@ -34,9 +37,13 @@
         : 'Good evening',
   )
 
-  const place = 'Stockholms kommun'
-  const temperature = 21
-  const conditions = 'Broken clouds'
+  let forecastOpen = $state(false)
+
+  $effect(() => watch())
+
+  const forecast = $derived(weather.forecast)
+  const current = $derived(forecast?.current)
+  const condition = $derived(current?.condition ?? 'unknown')
 
   const track = { title: 'Redbone', artist: 'Childish Gambino' }
 </script>
@@ -50,14 +57,21 @@
       <div class="date">{date}</div>
     </div>
 
-    <div class="where">
-      <div class="eyebrow">{place}</div>
-      <div class="weather">
-        <Icon name="cloud" size={34} />
-        <span class="temp">{temperature}°</span>
-      </div>
-      <div class="eyebrow">{conditions}</div>
-    </div>
+    <!-- The whole block opens the forecast, rather than a separate
+         control: it is already the thing you would reach for. -->
+    <button class="where" onclick={() => (forecastOpen = true)}>
+      <span class="eyebrow">{forecast?.place ?? ''}</span>
+      <span class="weather">
+        <Icon name={iconFor(condition)} size={34} />
+        <span class="temp">
+          {current?.temperature === null ||
+          current?.temperature === undefined
+            ? '—'
+            : Math.round(current.temperature)}°
+        </span>
+      </span>
+      <span class="eyebrow">{nameFor(condition)}</span>
+    </button>
   </Card>
 
   <div class="tiles">
@@ -86,6 +100,11 @@
     </Card>
   </div>
 </div>
+
+<WeatherDialog
+  open={forecastOpen}
+  onclose={() => (forecastOpen = false)}
+/>
 
 <style>
   .dashboard {
@@ -121,6 +140,21 @@
     flex-direction: column;
     align-items: flex-end;
     gap: 6px;
+    padding: var(--spacing-xs) var(--spacing-s);
+    margin: calc(var(--spacing-xs) * -1) calc(var(--spacing-s) * -1);
+    text-align: right;
+    background: none;
+    border: 0;
+    border-radius: var(--radius-sm);
+  }
+
+  .where:active {
+    background: var(--panel-2);
+  }
+
+  .where:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
   }
 
   .weather {

@@ -13,6 +13,9 @@
     /** Held open while something is running, so a scan cannot be
      *  dismissed halfway and leave the dongle busy. */
     dismissable?: boolean
+    /** How wide, in pixels. Some dialogs carry a list or a grid and
+     *  want the room; most read better narrow. */
+    width?: number
     children: Snippet
     footer?: Snippet
   }
@@ -22,6 +25,7 @@
     title,
     onclose,
     dismissable = true,
+    width = 560,
     children,
     footer,
   }: Props = $props()
@@ -37,6 +41,7 @@
 
 <dialog
   bind:this={element}
+  style:--width="{width}px"
   aria-labelledby="dialog-title"
   onclose={onclose}
   oncancel={(e) => {
@@ -85,7 +90,7 @@
 
 <style>
   dialog {
-    max-width: 560px;
+    max-width: var(--width);
     width: calc(100vw - 96px);
     max-height: calc(100dvh - 120px);
     padding: 0;

@@ -27,10 +27,10 @@
   /* Start a sweep whenever the dialog opens. Opening it is the
      request; a second button inside would be a step for nothing.
      
-     untrack, because scan() reads radio.scanning through its own
-     guard -- without it the effect depends on that flag, re-runs when
-     the scan sets it false on finishing, and starts another scan
-     immediately. It never stops. */
+     untrack because of the presets check below, which reads state the
+     call it guards then changes. scan() no longer needs it -- its own
+     guard is a plain flag -- but leaving the block untracked keeps
+     the two from having to be reasoned about separately. */
   $effect(() => {
     if (open) {
       untrack(() => {

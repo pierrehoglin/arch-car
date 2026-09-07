@@ -27,6 +27,18 @@ interface Store {
   error: string
 }
 
+/* Guards, deliberately not reactive.
+ *
+ * Reading radio.scanning inside scan() would make every $effect that
+ * calls it depend on that flag -- so finishing a scan would
+ * invalidate the effect, which would start another, for ever. The
+ * fields on the store are for the screens; these are control flow,
+ * and the two want different things.
+ *
+ * Nothing reachable from watch() or scan() may read a $state field.
+ */
+let scanning = false
+
 export const radio = $state<Store>({
   state: EMPTY_RADIO,
   presets: [],
@@ -121,8 +133,9 @@ export async function forgetPreset(frequency: number): Promise<void> {
  * device, so a second would fail on a busy dongle rather than queue.
  */
 export async function scan(identify = true): Promise<void> {
-  if (radio.scanning) return
+  if (scanning) return
 
+  scanning = true
   radio.scanning = true
   radio.error = ''
   try {
@@ -130,6 +143,7 @@ export async function scan(identify = true): Promise<void> {
   } catch (cause) {
     report(cause)
   } finally {
+    scanning = false
     radio.scanning = false
   }
 }

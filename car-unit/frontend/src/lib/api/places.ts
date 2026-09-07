@@ -1,5 +1,5 @@
 import { request } from './client'
-import type { Address } from './types'
+import type { Address, Place } from './types'
 
 /* Geocoding.
  *
@@ -20,3 +20,6 @@ export const search = (query: string, limit = 5) =>
   request<Address[]>('/geocode/search', {
     query: { q: query, limit },
   })
+
+/** Places that have been saved, in the order they were saved. */
+export const saved = () => request<Place[]>('/places')
