@@ -3,7 +3,11 @@ import type { Theme, ThemeAttr } from './types'
 
 /* Display preferences.
  *
- * Nothing here is wired to the daemon yet. The values live for the
+ * Volume and mute used to live here and do not any more: they are
+ * the state of a device, not a preference, and they belong to the
+ * audio store which the daemon feeds.
+ *
+ * Nothing left here is wired to the daemon yet. The values live for the
  * session and reset on reload, which is the right shape while the
  * screens are being built -- there is no half-persisted state to
  * reason about, and no backend contract to unpick later.
@@ -19,10 +23,6 @@ interface Display {
   nightPanel: boolean
   ambient: string
   brightness: number
-  volume: number
-  /** Silences output without losing the level, so unmuting comes back
-   *  where it was rather than at zero. */
-  muted: boolean
   panel: boolean
 }
 
@@ -31,8 +31,6 @@ export const display = $state<Display>({
   nightPanel: false,
   ambient: '#d8b146',
   brightness: 72,
-  volume: 60,
-  muted: false,
   panel: true,
 })
 

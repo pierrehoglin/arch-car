@@ -54,6 +54,9 @@
   import IconStar from '~icons/tabler/star'
   import IconStarOn from '~icons/tabler/star-filled'
   import IconVolume from '~icons/tabler/volume'
+  import IconVolumeLow from '~icons/tabler/volume-4'
+  import IconVolumeMid from '~icons/tabler/volume-2'
+  import IconVolumeZero from '~icons/tabler/volume-3'
   import IconVolumeOff from '~icons/tabler/volume-off'
 
   /* The transport row is the exception to the outlined set. These
@@ -115,6 +118,9 @@
     star: IconStar,
     'star-filled': IconStarOn,
     volume: IconVolume,
+    'volume-low': IconVolumeLow,
+    'volume-mid': IconVolumeMid,
+    'volume-zero': IconVolumeZero,
     muted: IconVolumeOff,
   }
 

@@ -3,6 +3,8 @@
   import type { Snippet } from 'svelte'
   import Header from '$lib/Header.svelte'
   import Rail from '$lib/Rail.svelte'
+  import { connect, disconnect } from '$lib/api/stream.svelte'
+  import { adjust, audio, setMuted, setVolume, watch } from '$lib/audio.svelte'
   import { accent, display, themeAttr } from '$lib/settings.svelte'
   import '../app.css'
 
@@ -32,6 +34,25 @@
       'Home',
   )
 
+  /* One connection for the session, opened here rather than by a
+     screen. The header shows volume everywhere, the source
+     supervisor can interrupt at any moment, and a screen that owned
+     the connection would close it on the way out -- so whatever was
+     pushed while you were elsewhere would simply be missed.
+     
+     Screens subscribe to what they care about and unsubscribe when
+     they go; the socket underneath outlives them. */
+  $effect(() => {
+    connect()
+    return disconnect
+  })
+
+  /* Subscribed here rather than in the header, because the volume is
+     shown on every screen and the header is never unmounted -- so
+     the subscription has the same lifetime either way, and this
+     keeps the component to displaying what it is given. */
+  $effect(() => watch())
+
   /* Theme goes on the document element rather than a wrapper, so the
      page background matches during overscroll. The accent is set
      inline because it is resolved per theme rather than declared in
@@ -51,10 +72,11 @@
   <div class="main">
     <Header
       {title}
-      volume={display.volume}
-      onvolume={(v) => (display.volume = v)}
-      muted={display.muted}
-      onmute={(v) => (display.muted = v)}
+      volume={audio.percent}
+      onvolume={setVolume}
+      onstep={adjust}
+      muted={audio.muted}
+      onmute={setMuted}
     />
 
     <main class="content">

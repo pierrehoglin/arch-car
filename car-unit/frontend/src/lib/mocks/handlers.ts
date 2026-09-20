@@ -105,6 +105,33 @@ function hash(text: string): number {
 export const handlers = [
   stream,
 
+  http.get('/api/audio', async () => {
+    await wait(NORMAL_MS)
+    return HttpResponse.json(device.currentVolume())
+  }),
+
+  http.post('/api/audio/volume', async ({ request }) => {
+    const { percent } = await body<{ percent: number }>(request)
+    await wait(NORMAL_MS)
+    return HttpResponse.json(device.setPercent(percent))
+  }),
+
+  http.post('/api/audio/adjust', async ({ request }) => {
+    const { delta = 0 } = await body<{ delta?: number }>(request)
+    await wait(NORMAL_MS)
+    return HttpResponse.json(device.adjustVolume(delta))
+  }),
+
+  http.post('/api/audio/mute', async ({ request }) => {
+    const { muted } = await body<{ muted?: boolean }>(request)
+    await wait(NORMAL_MS)
+    return HttpResponse.json(
+      muted === undefined || muted === null
+        ? device.toggleMuted()
+        : device.setMuted(muted),
+    )
+  }),
+
   http.get('/api/places', async () => {
     await wait(NORMAL_MS)
     return HttpResponse.json(SAVED_PLACES)

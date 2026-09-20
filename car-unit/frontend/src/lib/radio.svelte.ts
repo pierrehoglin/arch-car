@@ -1,6 +1,6 @@
 import * as fm from './api/fm'
 import { RequestFailed } from './api/client'
-import { connect, on, stream } from './api/stream.svelte'
+import { on, stream } from './api/stream.svelte'
 import { EMPTY_RADIO, type RadioState, type Signal, type Station } from './api/types'
 
 /* The radio, as one piece of state the screens share.
@@ -151,16 +151,20 @@ export async function scan(identify = true): Promise<void> {
 /**
  * Follow the daemon.
  *
- * Opens the stream if it is not already open and subscribes to what
- * the radio cares about. Returns an unsubscribe function, so an
- * $effect can hand it straight back.
+ * Subscribes to what the radio cares about. Returns an unsubscribe
+ * function, so an $effect can hand it straight back.
  *
- * The stream sends current state on connecting, so a screen mounting
- * halfway through a session is populated without also fetching.
+ * Does not open the connection: that belongs to the root layout,
+ * because the header shows volume on every screen and the source
+ * supervisor can interrupt while nobody is looking at the radio. A
+ * screen that opened it would close it again on the way out, and
+ * whatever was pushed meanwhile would simply be missed.
+ *
+ * The stream replays the current state to anyone connecting, and
+ * subscribing here picks up what it has already sent -- so a screen
+ * mounting halfway through a session is populated without fetching.
  */
 export function watch(): () => void {
-  connect()
-
   const off = [
     on('fm', (data) => {
       /* Ignored while an action is in flight: that action is about to

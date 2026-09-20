@@ -25,21 +25,22 @@ import logging
 import contextlib
 
 from fastapi import APIRouter, FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from carlib.core import settings, state
 from carlib.core.errors import CarError
-from carlib.api import routes
+from carlib.api import events, routes
 from carlib.location import geocoding
 from carlib.radio import fm
-from carlib.system import source
+from carlib.system import audio, source
 
 log = logging.getLogger('carlib')
 
 _supervisor: asyncio.Task | None = None
 _autostart_task: asyncio.Task | None = None
 _geocoder: asyncio.Task | None = None
+_audio_watch: asyncio.Task | None = None
 
 
 async def _run_supervisor() -> None:
@@ -128,20 +129,44 @@ async def _run_geocoder() -> None:
             await asyncio.sleep(60)
 
 
+async def _watch_audio() -> None:
+    """
+    Publish the volume whenever it changes.
+
+    Anything can move it -- the CLI, another program, the steering
+    wheel once CAN is wired -- and a UI that only saw its own changes
+    would drift the first time something else did.
+
+    Restarted on failure rather than given up on: pactl going away
+    means pipewire-pulse restarted, which it may well do, and the
+    stream should come back with it.
+    """
+    while True:
+        try:
+            async for volume in audio.watch():
+                events.events.publish('audio', volume.to_dict())
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception('audio watch failed; retrying in 10s')
+            await asyncio.sleep(10)
+
+
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
     # Take ownership of runtime state before anything can read it.
     state.use_memory()
     log.info('carlib daemon starting; state held in memory')
 
-    global _supervisor, _autostart_task, _geocoder
+    global _supervisor, _autostart_task, _geocoder, _audio_watch
     _supervisor = asyncio.create_task(_run_supervisor())
     _autostart_task = asyncio.create_task(_autostart())
     _geocoder = asyncio.create_task(_run_geocoder())
+    _audio_watch = asyncio.create_task(_watch_audio())
 
     yield
 
-    for task in (_autostart_task, _geocoder, _supervisor):
+    for task in (_autostart_task, _geocoder, _audio_watch, _supervisor):
         if task is not None:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -220,6 +245,20 @@ class SettingsBody(BaseModel):
     """
 
     values: dict
+
+
+class VolumeBody(BaseModel):
+    percent: int
+
+
+class AdjustBody(BaseModel):
+    delta: int
+
+
+class MuteBody(BaseModel):
+    """`muted` omitted means toggle."""
+
+    muted: bool | None = None
 
 
 class Point(BaseModel):
@@ -452,6 +491,56 @@ async def put_settings(body: SettingsBody) -> dict:
 @api.delete('/settings/{key}')
 async def delete_setting(key: str) -> dict:
     return await routes.settings_delete(key)
+
+
+# --- Audio ------------------------------------------------------------------
+
+@api.get('/audio')
+async def get_audio() -> dict:
+    return await routes.audio_status()
+
+
+@api.post('/audio/volume')
+async def post_audio_volume(body: VolumeBody) -> dict:
+    return await routes.audio_set(body.percent)
+
+
+@api.post('/audio/adjust')
+async def post_audio_adjust(body: AdjustBody) -> dict:
+    return await routes.audio_adjust(body.delta)
+
+
+@api.post('/audio/mute')
+async def post_audio_mute(body: MuteBody) -> dict:
+    """`muted` omitted toggles, which is what a single button wants."""
+    return await routes.audio_mute(body.muted)
+
+
+@api.get('/audio/devices')
+async def get_audio_devices() -> list[dict]:
+    return await routes.audio_devices()
+
+
+# --- Events -----------------------------------------------------------------
+
+@api.get('/events')
+async def get_events() -> StreamingResponse:
+    """
+    The event stream.
+
+    no-store and no-transform because a proxy that buffers this
+    delivers nothing until it decides the response is finished, which
+    for a stream is never.
+    """
+    return StreamingResponse(
+        events.stream(),
+        media_type='text/event-stream',
+        headers={
+            'Cache-Control': 'no-store, no-transform',
+            'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no',
+        },
+    )
 
 
 # --- Navigation -------------------------------------------------------------

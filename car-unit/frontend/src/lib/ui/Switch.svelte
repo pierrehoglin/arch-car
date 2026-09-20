@@ -3,9 +3,12 @@
     checked: boolean
     onchange: (checked: boolean) => void
     label?: string
+    /** While the change is being applied, so it cannot be flipped
+     *  again before the first one has taken. */
+    disabled?: boolean
   }
 
-  let { checked, onchange, label = '' }: Props = $props()
+  let { checked, onchange, label = '', disabled = false }: Props = $props()
 </script>
 
 <button
@@ -14,6 +17,7 @@
   role="switch"
   aria-checked={checked}
   aria-label={label}
+  {disabled}
   onclick={() => onchange(!checked)}
 >
   <span class="knob"></span>
@@ -51,6 +55,11 @@
 
   .switch.on .knob {
     transform: translateX(28px);
+  }
+
+  .switch:disabled {
+    opacity: 0.45;
+    cursor: default;
   }
 
   .switch:focus-visible {

@@ -37,6 +37,13 @@ export const SETTINGS_SECTIONS: Section[] = [
   { href: '/settings/about', label: 'About' },
 ]
 
+/** Only while developing. The route exists either way -- Vite would
+ *  have to be told to drop it -- but nothing links to it in a build,
+ *  and the module it controls is DEV-only anyway. */
+export const DEV_SECTIONS: Section[] = [
+  { href: '/settings/mocks', label: 'Mocks' },
+]
+
 /** Media sources, each its own route. FM and USB have controls that
  *  have nothing to do with a phone player -- a frequency dial against
  *  a track list -- so they are pages, not a switch inside one. */

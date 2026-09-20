@@ -5,12 +5,17 @@
   interface Props {
     title: string
     volume: number
+    /** An absolute level, from the slider. */
     onvolume: (value: number) => void
+    /** A step, from the buttons. Sent as a step rather than a level
+     *  so the daemon reads and sets in one call -- nothing can
+     *  change in between. */
+    onstep: (delta: number) => void
     muted: boolean
     onmute: (muted: boolean) => void
   }
 
-  let { title, volume, onvolume, muted, onmute }: Props = $props()
+  let { title, volume, onvolume, onstep, muted, onmute }: Props = $props()
 
   /* Temperature, signal and Bluetooth come from the status store --
      placeholders until the daemon feeds them. The clock is local and
@@ -18,6 +23,22 @@
   let now = $state(new Date())
   const outside = $derived(status.outside)
   const bars = $derived(status.bars)
+
+  /* The speaker shows roughly how loud it is, so the icon means
+     something at a glance rather than only saying "audio". Muted
+     wins over the level: the level is still whatever it was, and
+     showing it would suggest sound is coming out. */
+  const speaker = $derived(
+    muted
+      ? 'muted'
+      : volume === 0
+        ? 'volume-zero'
+        : volume <= 33
+          ? 'volume-low'
+          : volume <= 66
+            ? 'volume-mid'
+            : 'volume',
+  )
 
   $effect(() => {
     const timer = setInterval(() => (now = new Date()), 10_000)
@@ -32,19 +53,11 @@
   )
 
   /* Muting drops the slider to zero and unmuting puts it back: the
-     level is kept in `volume` throughout, so the thumb returns to
+     level is held by the store throughout, so the thumb returns to
      where it was rather than to silence.
 
-     Any deliberate move un-mutes. Reaching for the volume is a clear
-     enough signal that you want to hear something, and changing a
-     level that stays silent is the sort of thing you press twice
-     before noticing. */
-  const change = (value: number) => {
-    if (muted) onmute(false)
-    onvolume(Math.max(0, Math.min(100, value)))
-  }
-
-  const step = (delta: number) => change(volume + delta)
+     Un-muting on a move is the store's job, since the slider and the
+     buttons both want it and it is one rule. */
 </script>
 
 <header class="bar">
@@ -58,10 +71,10 @@
       aria-pressed={muted}
       aria-label={muted ? 'Unmute' : 'Mute'}
     >
-      <Icon name={muted ? 'muted' : 'volume'} size={26} />
+      <Icon name={speaker} size={26} />
     </button>
 
-    <button class="round" onclick={() => step(-5)} aria-label="Quieter">
+    <button class="round" onclick={() => onstep(-5)} aria-label="Quieter">
       <Icon name="remove" size={18} />
     </button>
 
@@ -72,11 +85,11 @@
       max="100"
       value={muted ? 0 : volume}
       style:--fill="{muted ? 0 : volume}%"
-      oninput={(e) => change(+e.currentTarget.value)}
+      oninput={(e) => onvolume(+e.currentTarget.value)}
       aria-label="Volume"
     />
 
-    <button class="round" onclick={() => step(5)} aria-label="Louder">
+    <button class="round" onclick={() => onstep(5)} aria-label="Louder">
       <Icon name="add" size={18} />
     </button>
 

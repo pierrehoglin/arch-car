@@ -20,7 +20,7 @@ from carlib.core.errors import (
 from carlib.location import geocoding, places
 from carlib.navigation import routing
 from carlib.radio import fm
-from carlib.system import source
+from carlib.system import audio, source
 
 # Library exceptions to HTTP status. Anything unmapped is a 500, which
 # is correct: an unexpected exception is a bug here, not a client
@@ -246,6 +246,38 @@ async def navigate_match(points: list[tuple[float, float]],
 
 async def navigate_status() -> dict:
     return await routing.status()
+
+
+# --- Audio ------------------------------------------------------------------
+
+async def audio_status() -> dict:
+    return (await audio.get()).to_dict()
+
+
+async def audio_set(percent: int) -> dict:
+    """
+    Set the volume as a percentage.
+
+    The module clamps to 100 rather than letting wpctl run past it
+    into distortion, so a caller cannot ask for more than the
+    hardware should be given.
+    """
+    return (await audio.set_volume(percent)).to_dict()
+
+
+async def audio_adjust(delta: int) -> dict:
+    return (await audio.adjust(delta)).to_dict()
+
+
+async def audio_mute(muted: bool | None = None) -> dict:
+    """Mute, unmute, or -- with nothing given -- toggle."""
+    if muted is None:
+        return (await audio.toggle_mute()).to_dict()
+    return (await audio.set_muted(muted)).to_dict()
+
+
+async def audio_devices() -> list[dict]:
+    return [device.to_dict() for device in await audio.devices()]
 
 
 # --- Settings ---------------------------------------------------------------

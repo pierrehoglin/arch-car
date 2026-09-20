@@ -1,4 +1,9 @@
-import type { RadioState, Signal, Station } from '../api/types'
+import type {
+  RadioState,
+  Signal,
+  Station,
+  Volume,
+} from '../api/types'
 import { BROADCASTS, INITIAL, PRESETS, stateFor } from './fixtures'
 
 /* The simulated device.
@@ -18,6 +23,8 @@ const RDS_DELAY = 2500
 type Listener = (event: string, data: unknown) => void
 
 const listeners = new Set<Listener>()
+
+let volume: Volume = { percent: 47, muted: false, target: 'sink' }
 
 let radio: RadioState = INITIAL
 let presets: Station[] = [...PRESETS]
@@ -145,3 +152,28 @@ export function runScan(identify: boolean): Signal[] {
   emit('signals', scanned)
   return scanned
 }
+
+
+/* Audio.
+ *
+ * Clamped to 100 as the daemon does, rather than letting a caller
+ * ask for more than the hardware should be given.
+ */
+
+export const currentVolume = () => volume
+
+function setVolume(next: Volume): Volume {
+  volume = next
+  emit('audio', volume)
+  return volume
+}
+
+export const setPercent = (percent: number) =>
+  setVolume({ ...volume, percent: Math.max(0, Math.min(100, Math.round(percent))) })
+
+export const adjustVolume = (delta: number) =>
+  setPercent(volume.percent + delta)
+
+export const setMuted = (muted: boolean) => setVolume({ ...volume, muted })
+
+export const toggleMuted = () => setVolume({ ...volume, muted: !volume.muted })

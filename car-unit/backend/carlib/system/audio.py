@@ -16,9 +16,11 @@ as a user unit.
 
 import re
 import asyncio
+import contextlib
+from typing import AsyncIterator
 from dataclasses import dataclass, asdict
 
-from carlib.core.errors import NotAvailableError
+from carlib.core.errors import CarError, NotAvailableError
 
 WPCTL = 'wpctl'
 
@@ -210,3 +212,66 @@ async def microphone() -> Volume:
 
 async def set_microphone(percent: int) -> Volume:
     return await set_volume(percent, SOURCE)
+
+
+async def watch() -> AsyncIterator[Volume]:
+    """
+    Yield the volume whenever it changes.
+
+    Subscribes to PipeWire's PulseAudio compatibility layer rather
+    than polling: `pactl subscribe` emits a line per change, so a
+    reading is only taken when something has actually happened. A
+    poll would mean spawning wpctl once a second for the rest of the
+    ignition cycle to be told nothing has changed.
+
+    Changes made anywhere count -- the CLI, another program, or the
+    steering wheel buttons once CAN is wired -- which is the point.
+    A UI that only saw its own changes would drift the first time
+    something else touched the volume.
+
+    Requires pipewire-pulse. Without it `pactl` is not there, and the
+    caller sees the process fail rather than a silent nothing.
+    """
+    process = await asyncio.create_subprocess_exec(
+        'pactl', 'subscribe',
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+
+    if process.stdout is None:
+        raise NotAvailableError(
+            'cannot read from pactl',
+            hint='is pipewire-pulse installed and running?')
+
+    last: Volume | None = None
+
+    try:
+        # The current reading first, so a subscriber is not left with
+        # nothing until somebody turns a knob.
+        last = await get()
+        yield last
+
+        async for raw in process.stdout:
+            line = raw.decode(errors='replace')
+
+            # Only sink changes. The stream also carries clients,
+            # streams and cards, none of which move the volume.
+            if "on sink #" not in line and 'on server' not in line:
+                continue
+
+            try:
+                current = await get()
+            except CarError:
+                continue
+
+            # pactl reports several events for one change: a mute and
+            # a volume line arrive together, and each stream attached
+            # to the sink adds its own.
+            if last is None or current != last:
+                last = current
+                yield current
+    finally:
+        if process.returncode is None:
+            process.terminate()
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(process.wait(), timeout=2.0)

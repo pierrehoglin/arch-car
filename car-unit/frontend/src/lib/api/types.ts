@@ -103,6 +103,19 @@ export interface Address {
   osm_id: string
 }
 
+/**
+ * Volume, mirroring carlib.system.audio.Volume.
+ *
+ * `target` says which stream this is: a sink is an output -- the
+ * speakers -- and a source is an input, the microphone. The same
+ * shape serves both.
+ */
+export interface Volume {
+  percent: number
+  muted: boolean
+  target: 'sink' | 'source'
+}
+
 /** A saved location, mirroring carlib.location.places.Place. */
 export interface Place {
   name: string
