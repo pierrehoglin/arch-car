@@ -59,8 +59,6 @@ export const sinks = () =>
 export const sources = () =>
   audio.devices.filter((device) => device.kind === 'source')
 
-export const defaultOf = (kind: 'sink' | 'source') =>
-  audio.devices.find((device) => device.kind === kind && device.is_default)
 
 /* None of this is $state: an $effect reading any of it would re-run
    when a write settled, and a store that starts its own writes would

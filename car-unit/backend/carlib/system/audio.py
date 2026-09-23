@@ -260,10 +260,37 @@ class AudioState:
         }
 
 
+async def _reading(target: str) -> Volume:
+    """
+    A level, or silence where there is nothing to read.
+
+    With no default sink -- a car at boot before the DAC is up, or a
+    Pi with nothing plugged in -- wpctl exits non-zero rather than
+    reporting zero. Letting that propagate takes the whole reading
+    down, device list included, for a state that is perfectly
+    ordinary; and the watcher then retries every ten seconds for as
+    long as it lasts.
+
+    Not muted: there is nothing there to be muted. Zero says what is
+    true, and the empty device list says why.
+    """
+    kind = 'source' if target == SOURCE else 'sink'
+    try:
+        return await get(target)
+    except CarError:
+        return Volume(percent=0, muted=False, target=kind)
+
+
 async def state() -> AudioState:
+    """
+    Everything at once, tolerating an empty graph.
+
+    Only `devices()` is allowed to fail here. If wpctl cannot be run
+    at all that is worth reporting, but a missing default is not.
+    """
     return AudioState(
-        volume=await get(),
-        microphone=await microphone(),
+        volume=await _reading(SINK),
+        microphone=await _reading(SOURCE),
         devices=await devices(),
     )
 

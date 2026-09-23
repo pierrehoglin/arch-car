@@ -250,10 +250,6 @@ async def navigate_status() -> dict:
 
 # --- Audio ------------------------------------------------------------------
 
-async def audio_status() -> dict:
-    return (await audio.get()).to_dict()
-
-
 async def audio_set(percent: int) -> dict:
     """
     Set the volume as a percentage.
