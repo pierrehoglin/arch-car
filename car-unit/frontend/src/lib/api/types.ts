@@ -137,6 +137,9 @@ export interface AudioStream {
   media_class: string
   state: string
   binary: string
+  /** What the node calls itself, which for a Bluetooth phone is the
+   *  only readable name it has. */
+  description: string
   /** Null where the graph reported no level -- distinct from zero,
    *  which is a real silence. */
   percent: number | null

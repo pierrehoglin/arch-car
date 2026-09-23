@@ -194,11 +194,20 @@ export function runScan(identify: boolean): Signal[] {
    something readable. */
 let audioStreams = [
   { id: 73, name: 'spotifyd', application: 'PipeWire ALSA [spotifyd]',
+    description: 'PipeWire ALSA [spotifyd]',
     media_class: 'Stream/Output/Audio', state: 'running',
     binary: 'spotifyd', percent: 62, muted: false },
   { id: 91, name: 'carlib-fm', application: 'carlib-fm',
+    description: 'carlib-fm',
     media_class: 'Stream/Output/Audio', state: 'idle',
     binary: 'rtl_fm', percent: 38, muted: false },
+  {
+    /* A phone over A2DP: WirePlumber makes it a playback stream, not
+       a source, and it sets no application name at all. */
+    id: 105, name: 'bluez_input.20_F0_94_03_AB_DF.2', application: '',
+    description: 'Pierre Pixel',
+    media_class: 'Stream/Output/Audio', state: 'running',
+    binary: '', percent: 74, muted: false },
 ]
 
 export const audioState = () => ({

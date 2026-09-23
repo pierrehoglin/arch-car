@@ -73,15 +73,24 @@ export const sources = () =>
 export const playing = () =>
   audio.streams.filter((stream) => stream.percent !== null)
 
-/** A stream's name as it is worth reading. */
+/**
+ * A stream's name as it is worth reading.
+ *
+ * Description first. A phone playing over Bluetooth arrives as a
+ * stream with no application name and a node name of
+ * bluez_input.20_F0_94_03_AB_DF.2, but describes itself as "Pierre
+ * Pixel" -- which is the only part anyone would recognise.
+ */
 export function nameOf(stream: AudioStream): string {
-  const raw = stream.application || stream.name || stream.binary
+  const raw =
+    stream.description || stream.application || stream.name || stream.binary
   return NAMES[raw] ?? raw
 }
 
-/* What the graph calls them against what they are. carlib names its
-   own nodes, and spotifyd reaches PipeWire through the ALSA plugin,
-   which labels the stream after the plugin rather than the player. */
+/* What the graph calls them against what they are, for the few that
+   describe themselves badly. carlib names its own nodes, and
+   spotifyd reaches PipeWire through the ALSA plugin, which labels
+   the stream after the plugin rather than the player. */
 const NAMES: Record<string, string> = {
   'carlib-fm': 'FM radio',
   spotifyd: 'Spotify',

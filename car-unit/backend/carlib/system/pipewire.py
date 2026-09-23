@@ -40,6 +40,11 @@ class Node:
     media_class: str = ''
     state: str = ''
     binary: str = ''
+    # What the node calls itself. A Bluetooth phone arrives as a
+    # playback stream named bluez_input.20_F0_94_03_AB_DF.2 with no
+    # application.name at all, but describes itself as "Pierre
+    # Pixel" -- so this is often the only readable name there is.
+    description: str = ''
     # None where the graph did not report a volume -- params are not
     # always enumerated, and a node that has never played may have
     # none. Distinguished from zero, which is a real silence.
@@ -168,6 +173,7 @@ def parse_nodes(text: str) -> list[Node]:
             media_class=media_class,
             state=info.get('state', ''),
             binary=props.get('application.process.binary', ''),
+            description=props.get('node.description', ''),
             percent=percent,
             muted=muted,
         ))
