@@ -277,7 +277,44 @@ async def audio_mute(muted: bool | None = None) -> dict:
 
 
 async def audio_devices() -> list[dict]:
+    """Every sink and source, with the default of each marked."""
     return [device.to_dict() for device in await audio.devices()]
+
+
+async def audio_set_default(node_id: int) -> list[dict]:
+    """
+    Choose the default sink or source.
+
+    wpctl writes the choice to WirePlumber's own state, so it holds
+    across restarts. Without ever setting one, WirePlumber picks by
+    priority at every boot -- which means the output moves depending
+    on what happens to be plugged in.
+    """
+    return [device.to_dict() for device in await audio.set_default(node_id)]
+
+
+async def audio_device_volume(node_id: int, percent: int) -> dict:
+    """
+    Set one device's level, rather than whichever is default.
+
+    wpctl takes a node id wherever it takes @DEFAULT_AUDIO_SINK@, so
+    this is the same call with a different target.
+    """
+    return (await audio.set_volume(percent, str(node_id))).to_dict()
+
+
+async def audio_device_mute(node_id: int, muted: bool | None) -> dict:
+    if muted is None:
+        return (await audio.toggle_mute(str(node_id))).to_dict()
+    return (await audio.set_muted(muted, str(node_id))).to_dict()
+
+
+async def audio_microphone() -> dict:
+    return (await audio.microphone()).to_dict()
+
+
+async def audio_set_microphone(percent: int) -> dict:
+    return (await audio.set_microphone(percent)).to_dict()
 
 
 # --- Bluetooth --------------------------------------------------------------

@@ -150,8 +150,8 @@ async def _watch_audio() -> None:
     """
     while True:
         try:
-            async for volume in audio.watch():
-                events.events.publish('audio', volume.to_dict())
+            async for reading in audio.watch():
+                events.events.publish('audio', reading.to_dict())
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -259,6 +259,10 @@ class SettingsBody(BaseModel):
 
 class VolumeBody(BaseModel):
     percent: int
+
+
+class DefaultBody(BaseModel):
+    node_id: int
 
 
 class AdjustBody(BaseModel):
@@ -519,7 +523,9 @@ async def delete_setting(key: str) -> dict:
 
 @api.get('/audio')
 async def get_audio() -> dict:
-    return await routes.audio_status()
+    """Volume, microphone and devices -- the same shape the stream
+    publishes, so a screen can start from either."""
+    return (await audio.state()).to_dict()
 
 
 @api.post('/audio/volume')
@@ -541,6 +547,33 @@ async def post_audio_mute(body: MuteBody) -> dict:
 @api.get('/audio/devices')
 async def get_audio_devices() -> list[dict]:
     return await routes.audio_devices()
+
+
+@api.post('/audio/default')
+async def post_audio_default(body: DefaultBody) -> list[dict]:
+    """Pin the default sink or source; wpctl remembers it."""
+    return await routes.audio_set_default(body.node_id)
+
+
+@api.post('/audio/devices/{node_id}/volume')
+async def post_device_volume(node_id: int, body: VolumeBody) -> dict:
+    return await routes.audio_device_volume(node_id, body.percent)
+
+
+@api.post('/audio/devices/{node_id}/mute')
+async def post_device_mute(node_id: int, body: MuteBody) -> dict:
+    """`muted` omitted toggles."""
+    return await routes.audio_device_mute(node_id, body.muted)
+
+
+@api.get('/audio/microphone')
+async def get_audio_microphone() -> dict:
+    return await routes.audio_microphone()
+
+
+@api.post('/audio/microphone')
+async def post_audio_microphone(body: VolumeBody) -> dict:
+    return await routes.audio_set_microphone(body.percent)
 
 
 # --- Bluetooth --------------------------------------------------------------

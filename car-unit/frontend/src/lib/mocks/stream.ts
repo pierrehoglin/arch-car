@@ -28,7 +28,7 @@ export const stream = sse('/api/events', ({ client, request }) => {
   send('fm', device.state())
   send('presets', device.allPresets())
   send('signals', device.signals())
-  send('audio', device.currentVolume())
+  send('audio', device.audioState())
   send('bluetooth', device.bluetoothState())
   send('pairing', device.btPending())
 

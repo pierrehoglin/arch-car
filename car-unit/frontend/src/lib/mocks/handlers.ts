@@ -107,7 +107,52 @@ export const handlers = [
 
   http.get('/api/audio', async () => {
     await wait(NORMAL_MS)
-    return HttpResponse.json(device.currentVolume())
+    return HttpResponse.json(device.audioState())
+  }),
+
+  http.get('/api/audio/devices', async () => {
+    await wait(NORMAL_MS)
+    return HttpResponse.json(device.allAudioDevices())
+  }),
+
+  http.post('/api/audio/default', async ({ request }) => {
+    const { node_id } = await body<{ node_id: number }>(request)
+    /* Switching the default tears down every stream on the old node
+       and rebuilds them on the new one, which is audible and not
+       instant. */
+    await wait(700)
+    return HttpResponse.json(device.setDefaultDevice(node_id))
+  }),
+
+  http.post('/api/audio/devices/:node_id/volume', async (
+    { params, request },
+  ) => {
+    const { percent } = await body<{ percent: number }>(request)
+    await wait(NORMAL_MS)
+    return HttpResponse.json(
+      device.setDeviceVolume(Number(params.node_id), percent),
+    )
+  }),
+
+  http.post('/api/audio/devices/:node_id/mute', async (
+    { params, request },
+  ) => {
+    const { muted } = await body<{ muted?: boolean }>(request)
+    await wait(NORMAL_MS)
+    return HttpResponse.json(
+      device.setDeviceMute(Number(params.node_id), !!muted),
+    )
+  }),
+
+  http.get('/api/audio/microphone', async () => {
+    await wait(NORMAL_MS)
+    return HttpResponse.json(device.currentMicrophone())
+  }),
+
+  http.post('/api/audio/microphone', async ({ request }) => {
+    const { percent } = await body<{ percent: number }>(request)
+    await wait(NORMAL_MS)
+    return HttpResponse.json(device.setMicrophone(percent))
   }),
 
   http.post('/api/audio/volume', async ({ request }) => {

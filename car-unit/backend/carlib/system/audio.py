@@ -52,6 +52,10 @@ class AudioDevice:
     name: str
     is_default: bool = False
     kind: str = 'sink'
+    # Read from the same `wpctl status` line rather than a call per
+    # device: the tail it prints is [vol: 0.65] or [vol: 0.65 MUTED].
+    percent: int = 0
+    muted: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -115,9 +119,15 @@ def parse_status(text: str) -> list[AudioDevice]:
 
     Those characters have to be stripped before anything else, and the
     section headings carry them too.
+
+    Only the Audio block counts. Video has Sinks and Sources of its
+    own -- every camera on the Pi appears under Video > Sources -- and
+    a parser that goes by the subheading alone returns the ISP as a
+    microphone, marked default.
     """
     devices = []
     section = None
+    domain = None
 
     # Everything wpctl uses to draw the tree.
     tree_chars = '\u2502\u251c\u2514\u2500\u2551\u2560\u255a|'
@@ -128,6 +138,14 @@ def parse_status(text: str) -> list[AudioDevice]:
             continue
 
         lowered = line.lower()
+
+        # Top-level blocks: Audio, Video, Settings. No trailing colon,
+        # which is what separates them from the subheadings.
+        if lowered in ('audio', 'video', 'settings'):
+            domain = lowered
+            section = None
+            continue
+
         if lowered.startswith('sinks:'):
             section = 'sink'
             continue
@@ -139,7 +157,7 @@ def parse_status(text: str) -> list[AudioDevice]:
             section = None
             continue
 
-        if section is None:
+        if section is None or domain != 'audio':
             continue
 
         match = re.match(r'(\*)?\s*(\d+)\.\s+(.+?)\s*(\[.*\])?$', line)
@@ -150,11 +168,16 @@ def parse_status(text: str) -> list[AudioDevice]:
         if not name:
             continue
 
+        tail = match.group(4) or ''
+        level = re.search(r'vol:\s*([0-9.]+)', tail)
+
         devices.append(AudioDevice(
             node_id=int(match.group(2)),
             name=name,
             is_default=match.group(1) == '*',
             kind=section,
+            percent=round(float(level.group(1)) * 100) if level else 0,
+            muted='MUTED' in tail.upper(),
         ))
 
     return devices
@@ -214,9 +237,40 @@ async def set_microphone(percent: int) -> Volume:
     return await set_volume(percent, SOURCE)
 
 
-async def watch() -> AsyncIterator[Volume]:
+@dataclass
+class AudioState:
     """
-    Yield the volume whenever it changes.
+    Everything the graph reports, in one reading.
+
+    Volume and the device list together because one subscription sees
+    both: a card appearing and a knob turning arrive on the same feed,
+    and two watchers would mean two `pactl subscribe` processes for
+    the same information.
+    """
+
+    volume: Volume
+    microphone: Volume
+    devices: list[AudioDevice]
+
+    def to_dict(self) -> dict:
+        return {
+            'volume': self.volume.to_dict(),
+            'microphone': self.microphone.to_dict(),
+            'devices': [device.to_dict() for device in self.devices],
+        }
+
+
+async def state() -> AudioState:
+    return AudioState(
+        volume=await get(),
+        microphone=await microphone(),
+        devices=await devices(),
+    )
+
+
+async def watch() -> AsyncIterator[AudioState]:
+    """
+    Yield the state whenever any of it changes.
 
     Subscribes to PipeWire's PulseAudio compatibility layer rather
     than polling: `pactl subscribe` emits a line per change, so a
@@ -243,24 +297,28 @@ async def watch() -> AsyncIterator[Volume]:
             'cannot read from pactl',
             hint='is pipewire-pulse installed and running?')
 
-    last: Volume | None = None
+    last: AudioState | None = None
 
     try:
         # The current reading first, so a subscriber is not left with
         # nothing until somebody turns a knob.
-        last = await get()
+        last = await state()
         yield last
 
         async for raw in process.stdout:
             line = raw.decode(errors='replace')
 
-            # Only sink changes. The stream also carries clients,
-            # streams and cards, none of which move the volume.
-            if "on sink #" not in line and 'on server' not in line:
+            # Sinks and sources for volume, cards for a device being
+            # plugged in or a Bluetooth phone connecting, the server
+            # for the default moving. Clients and streams are the rest
+            # of the feed and change none of this.
+            if not any(marker in line for marker in
+                       ('on sink #', 'on source #', 'on card #',
+                        'on server')):
                 continue
 
             try:
-                current = await get()
+                current = await state()
             except CarError:
                 continue
 

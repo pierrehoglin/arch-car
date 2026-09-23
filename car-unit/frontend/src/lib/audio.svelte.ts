@@ -1,7 +1,7 @@
 import * as api from './api/audio'
 import { on } from './api/stream.svelte'
 import { RequestFailed } from './api/client'
-import type { Volume } from './api/types'
+import type { AudioDevice, AudioState, Volume } from './api/types'
 
 /* The volume, shared by everything that shows or changes it.
  *
@@ -30,6 +30,12 @@ const QUIET_AFTER_WRITE = 250
 interface Store {
   percent: number
   muted: boolean
+  /** The microphone, which HFP calls use. Its own level, not the
+   *  output's. */
+  mic: number
+  micMuted: boolean
+  /** Every sink and source, with the default of each marked. */
+  devices: AudioDevice[]
   /** Whether the daemon has ever answered, so a screen can tell a
    *  real reading from the default. */
   known: boolean
@@ -39,9 +45,22 @@ interface Store {
 export const audio = $state<Store>({
   percent: 50,
   muted: false,
+  mic: 50,
+  micMuted: false,
+  devices: [],
   known: false,
   error: '',
 })
+
+/** The sinks, output first in the order the daemon gave them. */
+export const sinks = () =>
+  audio.devices.filter((device) => device.kind === 'sink')
+
+export const sources = () =>
+  audio.devices.filter((device) => device.kind === 'source')
+
+export const defaultOf = (kind: 'sink' | 'source') =>
+  audio.devices.find((device) => device.kind === kind && device.is_default)
 
 /* None of this is $state: an $effect reading any of it would re-run
    when a write settled, and a store that starts its own writes would
@@ -70,6 +89,96 @@ function apply(volume: Volume): void {
   audio.muted = volume.muted
   audio.known = true
   audio.error = ''
+}
+
+/* The whole reading, from the stream or a status call. Devices are
+   taken even while a write is settling: a write changes the volume,
+   never the device list, so there is nothing for them to contradict. */
+function applyState(reading: AudioState): void {
+  if (!deviceTimers.size) audio.devices = reading.devices
+  audio.mic = reading.microphone.percent
+  audio.micMuted = reading.microphone.muted
+  apply(reading.volume)
+}
+
+function report(cause: unknown): void {
+  audio.error =
+    cause instanceof RequestFailed || cause instanceof Error
+      ? cause.message
+      : String(cause)
+}
+
+/** Read everything once, for a screen that opens mid-session. */
+export async function refresh(): Promise<void> {
+  try {
+    applyState(await api.status())
+  } catch (cause) {
+    report(cause)
+  }
+}
+
+/**
+ * Choose the default sink or source.
+ *
+ * The response is the new device list, so the picker settles without
+ * waiting for the stream to come round.
+ */
+export async function setDefault(node_id: number): Promise<void> {
+  try {
+    audio.devices = await api.setDefault(node_id)
+    audio.error = ''
+  } catch (cause) {
+    report(cause)
+  }
+}
+
+/* A write per device, each with its own debounce: two sliders can be
+   moved in a session and the second must not cancel the first. Keyed
+   by node id, and dropped when the write goes. */
+const deviceTimers = new Map<number, ReturnType<typeof setTimeout>>()
+
+function patch(node_id: number, change: Partial<AudioDevice>): void {
+  audio.devices = audio.devices.map((device) =>
+    device.node_id === node_id ? { ...device, ...change } : device,
+  )
+}
+
+/**
+ * Set one device's level. Applies at once; the write follows.
+ *
+ * Moving the default sink here is the same thing the header slider
+ * does -- they are one level, and each will show the other move.
+ */
+export function setDeviceVolume(node_id: number, percent: number): void {
+  const level = clamp(percent)
+  patch(node_id, { percent: level, muted: false })
+
+  clearTimeout(deviceTimers.get(node_id))
+  deviceTimers.set(
+    node_id,
+    setTimeout(async () => {
+      deviceTimers.delete(node_id)
+      try {
+        const volume = await api.setDeviceVolume(node_id, level)
+        patch(node_id, { percent: volume.percent, muted: volume.muted })
+      } catch (cause) {
+        report(cause)
+      }
+    }, WRITE_DELAY),
+  )
+}
+
+export async function setDeviceMute(
+  node_id: number,
+  muted: boolean,
+): Promise<void> {
+  patch(node_id, { muted })
+  try {
+    const volume = await api.setDeviceMute(node_id, muted)
+    patch(node_id, { percent: volume.percent, muted: volume.muted })
+  } catch (cause) {
+    report(cause)
+  }
 }
 
 /**
@@ -185,7 +294,18 @@ export function setMuted(muted: boolean): void {
  */
 export function watch(): () => void {
   return on('audio', (data) => {
-    if (inflight > 0 || Date.now() < quietUntil) return
-    apply(data as Volume)
+    const reading = data as AudioState
+
+    /* Devices carry their own levels now, so an event arriving while
+       a slider is being dragged would describe them as they were.
+       Held back for the same window as the volume. */
+    if (inflight > 0 || deviceTimers.size || Date.now() < quietUntil) {
+      return
+    }
+
+    audio.devices = reading.devices
+    audio.mic = reading.microphone.percent
+    audio.micMuted = reading.microphone.muted
+    apply(reading.volume)
   })
 }

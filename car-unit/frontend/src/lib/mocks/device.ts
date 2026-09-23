@@ -1,4 +1,5 @@
 import type {
+  AudioDevice,
   RadioState,
   Signal,
   Station,
@@ -33,6 +34,23 @@ type Listener = (event: string, data: unknown) => void
 const listeners = new Set<Listener>()
 
 let volume: Volume = { percent: 47, muted: false, target: 'sink' }
+let mic: Volume = { percent: 62, muted: false, target: 'source' }
+
+/* Two sinks and two sources, as the unit really has: the DAC it
+   drives the speakers with, a headset that turns up over USB, and the
+   microphones that go with them. Node ids are PipeWire's, which
+   change when a device is re-plugged -- so nothing should store
+   them. */
+let audioDevices: AudioDevice[] = [
+  { node_id: 51, name: 'CarPiHat DAC Analog Stereo', is_default: true,
+    kind: 'sink', percent: 47, muted: false },
+  { node_id: 87, name: 'CORSAIR VIRTUOSO XT Analog Stereo',
+    is_default: false, kind: 'sink', percent: 100, muted: true },
+  { node_id: 65, name: 'CORSAIR VIRTUOSO XT Mono', is_default: true,
+    kind: 'source', percent: 62, muted: false },
+  { node_id: 93, name: 'Pierre Pixel (Handsfree)', is_default: false,
+    kind: 'source', percent: 85, muted: false },
+]
 
 let radio: RadioState = INITIAL
 let presets: Station[] = [...PRESETS]
@@ -168,12 +186,97 @@ export function runScan(identify: boolean): Signal[] {
  * ask for more than the hardware should be given.
  */
 
+/* The whole reading, which is what both /api/audio and the stream
+   send -- one shape, so a screen can start from either. */
+export const audioState = () => ({
+  volume: { ...volume },
+  microphone: { ...mic },
+  devices: audioDevices.map((device) => ({ ...device })),
+})
+
 export const currentVolume = () => volume
+
+function audioChanged(): void {
+  emit('audio', audioState())
+}
 
 function setVolume(next: Volume): Volume {
   volume = next
-  emit('audio', volume)
+
+  // The other direction of the same rule: the headline volume is the
+  // default sink's level.
+  audioDevices = audioDevices.map((device) =>
+    device.is_default && device.kind === 'sink'
+      ? { ...device, percent: next.percent, muted: next.muted }
+      : device,
+  )
+
+  audioChanged()
   return volume
+}
+
+export function setMicrophone(percent: number): Volume {
+  const level = Math.max(0, Math.min(100, Math.round(percent)))
+  mic = { ...mic, percent: level }
+
+  audioDevices = audioDevices.map((device) =>
+    device.is_default && device.kind === 'source'
+      ? { ...device, percent: level }
+      : device,
+  )
+
+  audioChanged()
+  return mic
+}
+
+export const currentMicrophone = () => mic
+
+export function setDefaultDevice(nodeId: number): AudioDevice[] {
+  const chosen = audioDevices.find((device) => device.node_id === nodeId)
+  if (!chosen) return audioDevices
+
+  // Per kind: choosing an output does not unset the input.
+  audioDevices = audioDevices.map((device) =>
+    device.kind === chosen.kind
+      ? { ...device, is_default: device.node_id === nodeId }
+      : device,
+  )
+
+  audioChanged()
+  return audioDevices
+}
+
+export const allAudioDevices = () => audioDevices
+
+function patchDevice(nodeId: number, change: Partial<AudioDevice>) {
+  audioDevices = audioDevices.map((device) =>
+    device.node_id === nodeId ? { ...device, ...change } : device,
+  )
+
+  /* The default sink is what the headline volume reads, so moving it
+     here moves that too -- they are one level, not two that happen to
+     agree. */
+  const changed = audioDevices.find((device) => device.node_id === nodeId)
+  if (changed?.is_default && changed.kind === 'sink') {
+    volume = { ...volume, percent: changed.percent, muted: changed.muted }
+  }
+  if (changed?.is_default && changed.kind === 'source') {
+    mic = { ...mic, percent: changed.percent, muted: changed.muted }
+  }
+
+  audioChanged()
+  return changed
+}
+
+export function setDeviceVolume(nodeId: number, percent: number) {
+  return patchDevice(nodeId, {
+    percent: Math.max(0, Math.min(100, Math.round(percent))),
+    muted: false,
+  })
+}
+
+export function setDeviceMute(nodeId: number, muted: boolean) {
+  return patchDevice(nodeId, { muted })
 }
 
 export const setPercent = (percent: number) =>

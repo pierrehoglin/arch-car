@@ -1,5 +1,5 @@
 import { request } from './client'
-import type { Volume } from './types'
+import type { AudioDevice, AudioState, Volume } from './types'
 
 /* Audio.
  *
@@ -11,7 +11,43 @@ import type { Volume } from './types'
  * should be given.
  */
 
-export const status = () => request<Volume>('/audio')
+export const status = () => request<AudioState>('/audio')
+
+export const devices = () => request<AudioDevice[]>('/audio/devices')
+
+/**
+ * Pin the default sink or source.
+ *
+ * wpctl writes it to WirePlumber's state, so it holds across
+ * restarts. Without ever choosing one, WirePlumber picks by priority
+ * at each boot and the output moves depending on what is plugged in.
+ */
+export const setDefault = (node_id: number) =>
+  request<AudioDevice[]>('/audio/default', {
+    method: 'POST',
+    body: { node_id },
+  })
+
+/** One device's level, rather than whichever is default. */
+export const setDeviceVolume = (node_id: number, percent: number) =>
+  request<Volume>(`/audio/devices/${node_id}/volume`, {
+    method: 'POST',
+    body: { percent },
+  })
+
+export const setDeviceMute = (node_id: number, muted?: boolean) =>
+  request<Volume>(`/audio/devices/${node_id}/mute`, {
+    method: 'POST',
+    body: { muted },
+  })
+
+export const microphone = () => request<Volume>('/audio/microphone')
+
+export const setMicrophone = (percent: number) =>
+  request<Volume>('/audio/microphone', {
+    method: 'POST',
+    body: { percent },
+  })
 
 export const setVolume = (percent: number) =>
   request<Volume>('/audio/volume', { method: 'POST', body: { percent } })

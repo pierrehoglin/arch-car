@@ -116,6 +116,26 @@ export interface Volume {
   target: 'sink' | 'source'
 }
 
+/** A sink or a source on the graph. */
+export interface AudioDevice {
+  /** PipeWire's node id, which is what wpctl takes. It changes when
+   *  the device is re-plugged, so never store it. */
+  node_id: number
+  name: string
+  is_default: boolean
+  kind: 'sink' | 'source'
+  /** Its own level, read from the same wpctl line as the rest. */
+  percent: number
+  muted: boolean
+}
+
+/** Everything the audio graph reports, as one reading. */
+export interface AudioState {
+  volume: Volume
+  microphone: Volume
+  devices: AudioDevice[]
+}
+
 /** A saved location, mirroring carlib.location.places.Place. */
 export interface Place {
   name: string

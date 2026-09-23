@@ -7,25 +7,19 @@ any other -- carlib.system.hotspot builds on this, adding the radio
 handover, DHCP leases and uplink that a bare service start cannot
 express. Use that module rather than these functions for the hotspot.
 
-Authorisation goes through polkit. Put this in
-/etc/polkit-1/rules.d/50-carunit.rules:
+Authorisation goes through polkit, which grants this user
+org.freedesktop.systemd1.manage-units for the units below and no
+others. The rule is docs/polkit/50-carunit.rules -- a file rather
+than a listing here, so that the units it names and SERVICES below
+cannot drift apart unnoticed:
 
-    polkit.addRule(function(action, subject) {
-        if (action.id == "org.freedesktop.systemd1.manage-units" &&
-            subject.user == "alarm") {
-            var unit = action.lookup("unit");
-            if (unit == "sshd.service" ||
-                unit == "bluetooth.service" ||
-                unit == "hostapd.service" ||
-                unit == "iwd.service") {
-                return polkit.Result.YES;
-            }
-        }
-    });
+    sudo install -m 644 docs/polkit/50-carunit.rules \\
+        /etc/polkit-1/rules.d/50-carunit.rules
+    sudo systemctl restart polkit
 
-then `sudo systemctl restart polkit`. Note polkit silently ignores
-rules with syntax errors -- check `journalctl -u polkit` if a call
-still fails.
+Without it every start and stop fails with AccessDenied. polkit
+silently ignores rules with syntax errors -- check
+`journalctl -u polkit` if a call still fails.
 """
 
 from dataclasses import dataclass, asdict
@@ -135,9 +129,9 @@ async def start(name: str) -> ServiceState:
     except Exception as exc:
         raise NotAvailableError(
             f'cannot start {unit}: {exc}',
-            hint='if this is a polkit error, add a rule granting '
-                 'org.freedesktop.systemd1.manage-units for this '
-                 'unit -- see carlib/system/services.py') from exc
+            hint='AccessDenied here is polkit: this user needs '
+                 'org.freedesktop.systemd1.manage-units for the '
+                 'unit. See docs/polkit/50-carunit.rules') from exc
     return await status(name)
 
 
@@ -146,7 +140,11 @@ async def stop(name: str) -> ServiceState:
     try:
         await systemd.manager().stop_unit(unit, systemd.MODE_REPLACE)
     except Exception as exc:
-        raise NotAvailableError(f'cannot stop {unit}: {exc}') from exc
+        raise NotAvailableError(
+            f'cannot stop {unit}: {exc}',
+            hint='AccessDenied here is polkit: this user needs '
+                 'org.freedesktop.systemd1.manage-units for the '
+                 'unit. See docs/polkit/50-carunit.rules') from exc
     return await status(name)
 
 
@@ -155,7 +153,11 @@ async def restart(name: str) -> ServiceState:
     try:
         await systemd.manager().restart_unit(unit, systemd.MODE_REPLACE)
     except Exception as exc:
-        raise NotAvailableError(f'cannot restart {unit}: {exc}') from exc
+        raise NotAvailableError(
+            f'cannot restart {unit}: {exc}',
+            hint='AccessDenied here is polkit: this user needs '
+                 'org.freedesktop.systemd1.manage-units for the '
+                 'unit. See docs/polkit/50-carunit.rules') from exc
     return await status(name)
 
 

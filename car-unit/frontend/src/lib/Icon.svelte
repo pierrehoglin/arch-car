@@ -21,6 +21,7 @@
   import IconBluetooth from '~icons/tabler/bluetooth'
   import IconBluetoothOn from '~icons/tabler/bluetooth-connected'
   import IconCamera from '~icons/tabler/camera'
+  import IconCheck from '~icons/tabler/check'
   import IconGamepad from '~icons/tabler/device-gamepad'
   import IconHeadphones from '~icons/tabler/headphones'
   import IconHeadset from '~icons/tabler/headset'
@@ -93,6 +94,7 @@
     bluetooth: IconBluetooth,
     'bluetooth-connected': IconBluetoothOn,
     camera: IconCamera,
+    check: IconCheck,
     gamepad: IconGamepad,
     headphones: IconHeadphones,
     headset: IconHeadset,
