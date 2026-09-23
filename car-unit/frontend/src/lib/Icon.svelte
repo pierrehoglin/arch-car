@@ -21,6 +21,17 @@
   import IconBluetooth from '~icons/tabler/bluetooth'
   import IconBluetoothOn from '~icons/tabler/bluetooth-connected'
   import IconCamera from '~icons/tabler/camera'
+  import IconGamepad from '~icons/tabler/device-gamepad'
+  import IconHeadphones from '~icons/tabler/headphones'
+  import IconHeadset from '~icons/tabler/headset'
+  import IconKeyboard from '~icons/tabler/keyboard'
+  import IconLaptop from '~icons/tabler/device-laptop'
+  import IconMobile from '~icons/tabler/device-mobile'
+  import IconMouse from '~icons/tabler/mouse'
+  import IconPrinter from '~icons/tabler/printer'
+  import IconRouter from '~icons/tabler/router'
+  import IconSpeaker from '~icons/tabler/device-speaker'
+  import IconTv from '~icons/tabler/device-tv'
   import IconArrowDown from '~icons/tabler/arrow-down'
   import IconArrowLeft from '~icons/tabler/arrow-left'
   import IconArrowRight from '~icons/tabler/arrow-right'
@@ -52,6 +63,7 @@
   import IconShift from '~icons/tabler/arrow-big-up'
   import IconSettings from '~icons/tabler/settings'
   import IconStar from '~icons/tabler/star'
+  import IconTrash from '~icons/tabler/trash'
   import IconStarOn from '~icons/tabler/star-filled'
   import IconVolume from '~icons/tabler/volume'
   import IconVolumeLow from '~icons/tabler/volume-4'
@@ -81,6 +93,17 @@
     bluetooth: IconBluetooth,
     'bluetooth-connected': IconBluetoothOn,
     camera: IconCamera,
+    gamepad: IconGamepad,
+    headphones: IconHeadphones,
+    headset: IconHeadset,
+    keyboard: IconKeyboard,
+    laptop: IconLaptop,
+    mobile: IconMobile,
+    mouse: IconMouse,
+    printer: IconPrinter,
+    router: IconRouter,
+    speaker: IconSpeaker,
+    tv: IconTv,
     backspace: IconBackspace,
     down: IconArrowDown,
     left: IconArrowLeft,
@@ -116,6 +139,7 @@
     settings: IconSettings,
     shift: IconShift,
     star: IconStar,
+    trash: IconTrash,
     'star-filled': IconStarOn,
     volume: IconVolume,
     'volume-low': IconVolumeLow,

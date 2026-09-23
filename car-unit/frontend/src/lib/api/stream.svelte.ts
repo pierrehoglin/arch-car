@@ -25,7 +25,15 @@ const PATH = '/api/events'
    because EventSource only delivers a named event to a listener
    registered for that name -- so anything missing here is silently
    never received. */
-const KNOWN = ['fm', 'presets', 'signals', 'audio', 'source'] as const
+const KNOWN = [
+  'fm',
+  'presets',
+  'signals',
+  'audio',
+  'source',
+  'bluetooth',
+  'pairing',
+] as const
 
 const handlers = new Map<string, Set<Handler>>()
 

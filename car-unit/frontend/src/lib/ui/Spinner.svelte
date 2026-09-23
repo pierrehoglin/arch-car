@@ -17,12 +17,18 @@
 ></span>
 
 <style>
+  /* Drawn in currentColor rather than the accent. A fixed colour is
+     invisible the moment the spinner lands on a background of the
+     same colour -- which it does inside a primary button, where the
+     accent is the fill. Following the text colour works on every
+     surface it is put on. */
   .spinner {
     display: block;
     width: var(--size);
     height: var(--size);
-    border: var(--stroke) solid var(--border);
-    border-top-color: var(--accent);
+    border: var(--stroke) solid
+      color-mix(in srgb, currentColor 22%, transparent);
+    border-top-color: currentColor;
     border-radius: 50%;
     animation: spin 900ms linear infinite;
   }

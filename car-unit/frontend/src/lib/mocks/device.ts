@@ -4,7 +4,15 @@ import type {
   Station,
   Volume,
 } from '../api/types'
-import { BROADCASTS, INITIAL, PRESETS, stateFor } from './fixtures'
+import {
+  BROADCASTS,
+  BT_ADAPTER,
+  BT_DEVICES,
+  INITIAL,
+  PRESETS,
+  stateFor,
+  type BtFixture,
+} from './fixtures'
 
 /* The simulated device.
  *
@@ -177,3 +185,190 @@ export const adjustVolume = (delta: number) =>
 export const setMuted = (muted: boolean) => setVolume({ ...volume, muted })
 
 export const toggleMuted = () => setVolume({ ...volume, muted: !volume.muted })
+
+
+/* Bluetooth.
+ *
+ * The same shape the daemon publishes: adapter, devices, the pairing
+ * window, and how the last pairing went.
+ */
+
+let adapter = { ...BT_ADAPTER }
+let bt: BtFixture[] = BT_DEVICES.map((device) => ({ ...device }))
+let window_ = { open: false, seconds_left: 0 }
+let closer: ReturnType<typeof setTimeout> | undefined
+let ticking: ReturnType<typeof setInterval> | undefined
+
+function btState() {
+  return {
+    adapter: { ...adapter },
+    /* A device BlueZ has never discovered does not exist as far as
+       it is concerned. Once a scan has found one it stays on the bus,
+       so `nearby` here means "not found yet" rather than "only while
+       looking". */
+    devices: bt
+      .filter((device) => !device.nearby)
+      .map(({ nearby, ...device }) => device)
+      .sort((a, b) =>
+        Number(b.connected) - Number(a.connected) ||
+        Number(b.paired) - Number(a.paired) ||
+        a.name.localeCompare(b.name),
+      ),
+    window: { ...window_ },
+    attempt: btAttempt,
+  }
+}
+
+let btAttempt: { address: string; state: string; error: string } | null = null
+
+function btChanged(): void {
+  emit('bluetooth', btState())
+}
+
+export const bluetoothState = btState
+
+export function setBluetoothService(active: boolean) {
+  adapter = { ...adapter, service_active: active, powered: active }
+  if (!active) stopPairingWindow()
+  btChanged()
+  return adapter
+}
+
+export function startPairingWindow(seconds: number) {
+  const span = Math.max(10, Math.min(600, Math.round(seconds)))
+
+  /* Found by this scan, and known from now on. Staggered, because
+     devices arrive over the first seconds of a scan rather than all
+     at once -- and a list that fills in is the thing the screen has
+     to cope with. */
+  bt.filter((device) => device.nearby).forEach((device, index) => {
+    setTimeout(() => {
+      device.nearby = false
+      btChanged()
+    }, 800 + index * 900)
+  })
+  window_ = { open: true, seconds_left: span }
+  adapter = { ...adapter, discoverable: true, pairable: true,
+              discovering: true }
+
+  clearTimeout(closer)
+  clearInterval(ticking)
+
+  /* Counted down rather than left at the figure it started with, so
+     the screen can show it running out. */
+  ticking = setInterval(() => {
+    window_ = { ...window_, seconds_left: Math.max(0, window_.seconds_left - 1) }
+    btChanged()
+  }, 1000)
+
+  closer = setTimeout(() => stopPairingWindow(), span * 1000)
+
+  btChanged()
+  return { ...window_ }
+}
+
+export function stopPairingWindow() {
+  clearTimeout(closer)
+  clearInterval(ticking)
+  closer = undefined
+  ticking = undefined
+  window_ = { open: false, seconds_left: 0 }
+  adapter = { ...adapter, discoverable: false, pairable: false,
+              discovering: false }
+  btChanged()
+  return { ...window_ }
+}
+
+function btFind(address: string): BtFixture | undefined {
+  return bt.find((device) => device.address === address.toUpperCase())
+}
+
+export function btConnect(address: string) {
+  const device = btFind(address)
+  if (!device) return null
+  // One at a time, as the car does: connecting a second phone drops
+  // the first.
+  bt = bt.map((each) => ({ ...each, connected: each === device }))
+  btChanged()
+  return btFind(address)
+}
+
+export function btDisconnect(address: string) {
+  const device = btFind(address)
+  if (device) device.connected = false
+  btChanged()
+  return device
+}
+
+/* A pairing waiting to be confirmed.
+ *
+ * The real agent holds BlueZ's call open while this sits here, which
+ * is why the dialog has a countdown: BlueZ gives up at about thirty
+ * seconds whatever the screen is doing.
+ */
+let btRequest: {
+  device: string
+  address: string
+  name: string
+  passkey: string | null
+  kind: string
+} | null = null
+
+let btExpiry: ReturnType<typeof setTimeout> | undefined
+
+export const btPending = () => btRequest
+
+function askToPair(device: BtFixture): void {
+  clearTimeout(btExpiry)
+
+  btRequest = {
+    device: device.path,
+    address: device.address,
+    name: device.name,
+    // Six digits, zero-padded, as BlueZ sends them.
+    passkey: String(Math.floor(Math.random() * 1_000_000)).padStart(6, '0'),
+    kind: 'confirm',
+  }
+
+  btAttempt = { address: device.address, state: 'pairing', error: '' }
+  emit('pairing', btRequest)
+  btChanged()
+
+  btExpiry = setTimeout(() => btAnswer(false), 28_000)
+}
+
+export function btPair(address: string) {
+  const device = btFind(address)
+  if (!device) return null
+  askToPair(device)
+  return { address: device.address, state: 'pairing', error: '' }
+}
+
+export function btAnswer(accept: boolean) {
+  if (!btRequest) return { answered: false }
+
+  clearTimeout(btExpiry)
+  const device = btFind(btRequest.address)
+
+  if (accept && device) {
+    device.paired = true
+    device.trusted = true
+    btAttempt = { address: device.address, state: 'paired', error: '' }
+  } else {
+    btAttempt = {
+      address: btRequest.address,
+      state: 'failed',
+      error: accept ? 'device went away' : 'rejected',
+    }
+  }
+
+  btRequest = null
+  emit('pairing', null)
+  btChanged()
+  return { answered: true }
+}
+
+export function btForget(address: string) {
+  bt = bt.filter((device) => device.address !== address.toUpperCase())
+  btChanged()
+}

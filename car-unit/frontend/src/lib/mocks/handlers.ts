@@ -132,6 +132,69 @@ export const handlers = [
     )
   }),
 
+  http.get('/api/bluetooth', async () => {
+    await wait(NORMAL_MS)
+    return HttpResponse.json(device.bluetoothState())
+  }),
+
+  http.post('/api/bluetooth/service', async ({ request }) => {
+    const { active } = await body<{ active: boolean }>(request)
+    /* Starting bluetoothd and waiting for the adapter takes a
+       moment, and a switch that flicks instantly here would hide
+       that the real one does not. */
+    await wait(1200)
+    return HttpResponse.json(device.setBluetoothService(active))
+  }),
+
+  http.post('/api/bluetooth/pairing-mode', async ({ request }) => {
+    const { seconds = 120 } = await body<{ seconds?: number }>(request)
+    await wait(NORMAL_MS)
+    return HttpResponse.json(device.startPairingWindow(seconds))
+  }),
+
+  http.delete('/api/bluetooth/pairing-mode', async () => {
+    await wait(NORMAL_MS)
+    return HttpResponse.json(device.stopPairingWindow())
+  }),
+
+  http.get('/api/bluetooth/pairing', async () => {
+    await wait(NORMAL_MS)
+    return HttpResponse.json(device.btPending())
+  }),
+
+  http.post('/api/bluetooth/pairing', async ({ request }) => {
+    const { accept } = await body<{ accept: boolean }>(request)
+    await wait(NORMAL_MS)
+    return HttpResponse.json(device.btAnswer(accept))
+  }),
+
+  http.post('/api/bluetooth/devices/:address/pair', async ({ params }) => {
+    /* Returns as soon as BlueZ has something to ask about. The
+       pairing itself finishes when the code is confirmed, which
+       arrives on the stream. */
+    await wait(NORMAL_MS)
+    return HttpResponse.json(device.btPair(String(params.address)))
+  }),
+
+  http.post('/api/bluetooth/devices/:address/connect', async ({ params }) => {
+    /* Bringing up every profile the phone offers is slower than it
+       sounds on a cold link. */
+    await wait(1800)
+    return HttpResponse.json(device.btConnect(String(params.address)))
+  }),
+
+  http.post('/api/bluetooth/devices/:address/disconnect',
+            async ({ params }) => {
+    await wait(600)
+    return HttpResponse.json(device.btDisconnect(String(params.address)))
+  }),
+
+  http.delete('/api/bluetooth/devices/:address', async ({ params }) => {
+    await wait(NORMAL_MS)
+    device.btForget(String(params.address))
+    return HttpResponse.json({ forgotten: String(params.address) })
+  }),
+
   http.get('/api/places', async () => {
     await wait(NORMAL_MS)
     return HttpResponse.json(SAVED_PLACES)

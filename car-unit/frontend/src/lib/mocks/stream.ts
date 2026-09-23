@@ -1,5 +1,5 @@
-import { sse } from 'msw';
-import * as device from './device';
+import { sse } from 'msw'
+import * as device from './device'
 
 /* The event stream, standing in for the daemon's.
  *
@@ -18,22 +18,24 @@ import * as device from './device';
 
 export const stream = sse('/api/events', ({ client, request }) => {
   const send = (event: string, data: unknown) => {
-    client.send({ event, data });
-  };
+    client.send({ event, data })
+  }
 
   /* Current state first, so a screen that connects mid-session is
      populated without also having to fetch. A stream that only
      carries changes leaves the first paint empty until something
      happens to change. */
-  send('fm', device.state());
-  send('presets', device.allPresets());
-  send('signals', device.signals());
-  send('audio', device.currentVolume());
+  send('fm', device.state())
+  send('presets', device.allPresets())
+  send('signals', device.signals())
+  send('audio', device.currentVolume())
+  send('bluetooth', device.bluetoothState())
+  send('pairing', device.btPending())
 
-  const unsubscribe = device.subscribe(send);
+  const unsubscribe = device.subscribe(send)
 
   /* The request is aborted when the EventSource is closed or the
      page goes away. Without unsubscribing, every reload would leave
      another listener writing to a client that has gone. */
-  request.signal.addEventListener('abort', unsubscribe, { once: true });
-});
+  request.signal.addEventListener('abort', unsubscribe, { once: true })
+})

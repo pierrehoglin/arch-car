@@ -60,7 +60,7 @@
           <Button variant="quiet" onclick={() => (confirming = false)}>
             Keep
           </Button>
-          <Button onclick={remove} class="danger">Remove</Button>
+          <Button variant="danger" onclick={remove}>Remove</Button>
         </div>
       </div>
     {/if}
@@ -112,8 +112,4 @@
     gap: var(--spacing-s);
   }
 
-  .confirm-actions :global(.danger) {
-    color: #fff;
-    background: var(--danger);
-  }
 </style>

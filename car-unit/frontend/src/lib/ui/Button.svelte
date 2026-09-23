@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte'
 
-  type Variant = 'plain' | 'primary' | 'quiet'
+  type Variant = 'plain' | 'primary' | 'quiet' | 'danger'
 
   interface Props {
     variant?: Variant
@@ -9,6 +9,9 @@
     square?: boolean
     /** Marks a toggle as on, and carries the accent while it is. */
     pressed?: boolean
+    /** Something is in flight. Keeps it legible while disabled, for
+     *  a button whose content is a spinner. */
+    working?: boolean
     disabled?: boolean
     /** Needed when the content is an icon with no text. */
     label?: string
@@ -21,6 +24,7 @@
     variant = 'plain',
     square = false,
     pressed,
+    working = false,
     disabled = false,
     label = '',
     onclick,
@@ -33,6 +37,7 @@
   class="button {variant} {extra}"
   class:square
   class:pressed
+  class:working
   {disabled}
   aria-label={label || undefined}
   aria-pressed={pressed}
@@ -66,6 +71,15 @@
     background: var(--accent);
   }
 
+  /* For the one action in a dialog that cannot be undone. A variant
+     rather than a class passed in: styling a Button from outside
+     needs :global, and a :global rule for a button in a footer
+     snippet has no parent to scope it to. */
+  .button.danger {
+    color: #fff;
+    background: var(--danger);
+  }
+
   .button.quiet {
     color: var(--text-dim);
     background: none;
@@ -92,6 +106,13 @@
        expects it, it just has nothing to act on yet. */
     opacity: 0.45;
     cursor: default;
+  }
+
+  /* Except while it is working. A button showing a spinner is doing
+     something, and fading it to nearly half makes the one moving
+     part on screen the hardest thing to see. */
+  .button.working:disabled {
+    opacity: 1;
   }
 
   .button:focus-visible {

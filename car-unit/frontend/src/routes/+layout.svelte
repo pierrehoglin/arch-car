@@ -5,6 +5,8 @@
   import Rail from '$lib/Rail.svelte'
   import { connect, disconnect } from '$lib/api/stream.svelte'
   import { adjust, audio, setMuted, setVolume, watch } from '$lib/audio.svelte'
+  import { watch as watchBluetooth } from '$lib/bluetooth.svelte'
+  import PairingDialog from '$lib/ui/PairingDialog.svelte'
   import { accent, display, themeAttr } from '$lib/settings.svelte'
   import '../app.css'
 
@@ -53,6 +55,11 @@
      keeps the component to displaying what it is given. */
   $effect(() => watch())
 
+  /* Bluetooth is followed here, not on the settings screen: a phone
+     can start pairing at any moment, and whoever is driving will not
+     be looking at Connectivity when it does. */
+  $effect(() => watchBluetooth())
+
   /* Theme goes on the document element rather than a wrapper, so the
      page background matches during overscroll. The accent is set
      inline because it is resolved per theme rather than declared in
@@ -84,6 +91,10 @@
     </main>
   </div>
 </div>
+
+<!-- Over everything, because the phone is waiting and BlueZ gives up
+     after half a minute. -->
+<PairingDialog />
 
 <style>
   /* minmax(0, 1fr) throughout, not a bare 1fr.

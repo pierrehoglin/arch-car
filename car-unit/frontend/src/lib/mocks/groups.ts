@@ -22,6 +22,12 @@ export const GROUPS: Group[] = [
     paths: ['/api/audio'],
   },
   {
+    id: 'bluetooth',
+    label: 'Bluetooth',
+    detail: 'The service, pairing and devices',
+    paths: ['/api/bluetooth'],
+  },
+  {
     id: 'events',
     label: 'Events',
     detail: 'The stream that pushes changes',

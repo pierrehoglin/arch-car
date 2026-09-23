@@ -215,3 +215,64 @@ export interface Forecast {
   /** Where this is the weather for. */
   place: string
 }
+
+/* Bluetooth, mirroring what the daemon's /api/bluetooth returns. */
+
+export interface BtAdapter {
+  path: string
+  address: string
+  name: string
+  powered: boolean
+  discoverable: boolean
+  pairable: boolean
+  discovering: boolean
+  /** Whether bluetooth.service is running. On and off is the service,
+   *  not the radio. */
+  service_active: boolean
+}
+
+export interface BtDevice {
+  path: string
+  address: string
+  name: string
+  /** BlueZ's own icon name: phone, audio-headset, computer. */
+  icon: string
+  connected: boolean
+  paired: boolean
+  trusted: boolean
+  /** Signal strength while discovering; absent once out of range. */
+  rssi: number | null
+  battery: number | null
+  uuids: string[]
+}
+
+/** How long the car is findable and scanning. */
+export interface BtWindow {
+  open: boolean
+  seconds_left: number
+}
+
+/** A pairing the car started, and how it went. */
+export interface BtAttempt {
+  address: string
+  state: 'pairing' | 'paired' | 'failed'
+  error: string
+}
+
+export interface BtState {
+  adapter: BtAdapter
+  devices: BtDevice[]
+  window: BtWindow
+  attempt: BtAttempt | null
+}
+
+/** A pairing waiting for someone to confirm it. */
+export interface PairingRequest {
+  device: string
+  address: string
+  name: string
+  /** Six digits to compare with the phone. Absent for Just Works,
+   *  where there is only a yes or no to give. */
+  passkey: string | null
+  kind: 'confirm' | 'authorize'
+}

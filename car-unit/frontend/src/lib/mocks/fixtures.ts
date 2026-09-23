@@ -330,3 +330,140 @@ export function makeForecast(place = 'current'): Forecast {
     place: NAMES[place] ?? place,
   }
 }
+
+
+/* Bluetooth.
+ *
+ * Two phones already paired, and two more that only turn up while
+ * scanning -- so the list changes when the search button is pressed
+ * rather than looking the same either way.
+ */
+
+export interface BtFixture {
+  path: string
+  address: string
+  name: string
+  icon: string
+  connected: boolean
+  paired: boolean
+  trusted: boolean
+  rssi: number | null
+  battery: number | null
+  uuids: string[]
+  /** Only visible while the car is scanning. */
+  nearby?: boolean
+}
+
+const HFP = '0000111f-0000-1000-8000-00805f9b34fb'
+const PBAP = '0000112f-0000-1000-8000-00805f9b34fb'
+const MAP = '00001132-0000-1000-8000-00805f9b34fb'
+
+export const BT_DEVICES: BtFixture[] = [
+  {
+    path: '/org/bluez/hci0/dev_AA_BB_CC_DD_EE_01',
+    address: 'AA:BB:CC:DD:EE:01',
+    name: "Anna's iPhone",
+    icon: 'phone',
+    connected: true,
+    paired: true,
+    trusted: true,
+    rssi: -54,
+    battery: 78,
+    uuids: [HFP, PBAP, MAP],
+  },
+  {
+    path: '/org/bluez/hci0/dev_AA_BB_CC_DD_EE_02',
+    address: 'AA:BB:CC:DD:EE:02',
+    name: "Erik's Pixel",
+    icon: 'phone',
+    connected: false,
+    paired: true,
+    trusted: true,
+    rssi: null,
+    battery: null,
+    uuids: [HFP, PBAP, MAP],
+  },
+  {
+    path: '/org/bluez/hci0/dev_AA_BB_CC_DD_EE_03',
+    address: 'AA:BB:CC:DD:EE:03',
+    name: 'Bose QC45',
+    icon: 'audio-headset',
+    connected: false,
+    paired: false,
+    trusted: false,
+    rssi: -71,
+    battery: null,
+    uuids: [],
+    nearby: true,
+  },
+  {
+    path: '/org/bluez/hci0/dev_AA_BB_CC_DD_EE_04',
+    address: 'AA:BB:CC:DD:EE:04',
+    name: 'Garage laptop',
+    icon: 'computer',
+    connected: false,
+    paired: false,
+    trusted: false,
+    rssi: -83,
+    battery: null,
+    uuids: [],
+    nearby: true,
+  },
+  {
+    path: '/org/bluez/hci0/dev_AA_BB_CC_DD_EE_05',
+    address: 'AA:BB:CC:DD:EE:05',
+    name: 'JBL Flip',
+    // No icon: plenty of devices report nothing, and the list has to
+    // look right for them too.
+    icon: '',
+    connected: false,
+    paired: false,
+    trusted: false,
+    rssi: -66,
+    battery: null,
+    uuids: [],
+    nearby: true,
+  },
+  {
+    /* The kind of thing a scan is full of: a beacon or a tag that
+       never announces a name. Present so the filter is exercised
+       while developing rather than only in a car park. */
+    path: '/org/bluez/hci0/dev_5C_11_22_33_44_55',
+    address: '5C:11:22:33:44:55',
+    name: '(unnamed)',
+    icon: '',
+    connected: false,
+    paired: false,
+    trusted: false,
+    rssi: -91,
+    battery: null,
+    uuids: [],
+    nearby: true,
+  },
+  {
+    path: '/org/bluez/hci0/dev_6D_22_33_44_55_66',
+    address: '6D:22:33:44:55:66',
+    /* BlueZ's own fallback: the address with hyphens, against an
+       address written with colons. */
+    name: '6D-22-33-44-55-66',
+    icon: '',
+    connected: false,
+    paired: false,
+    trusted: false,
+    rssi: -88,
+    battery: null,
+    uuids: [],
+    nearby: true,
+  },
+]
+
+export const BT_ADAPTER = {
+  path: '/org/bluez/hci0',
+  address: 'B8:27:EB:1A:2B:3C',
+  name: 'Saab 9-5',
+  powered: true,
+  discoverable: false,
+  pairable: false,
+  discovering: false,
+  service_active: true,
+}
