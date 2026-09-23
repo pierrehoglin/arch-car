@@ -51,9 +51,11 @@
 {#snippet devices(list: AudioDevice[], empty: string)}
   {#if list.length}
     {#each list as device (device.node_id)}
+      <!-- No "in use" line: the tick and the accent already say it,
+           and a label that appears on exactly one row makes the rows
+           different heights for no gain. -->
       <Row
         title={short(device)}
-        detail={device.is_default ? 'In use' : ''}
         selected={device.is_default}
         onclick={() => setDefault(device.node_id)}
       >
