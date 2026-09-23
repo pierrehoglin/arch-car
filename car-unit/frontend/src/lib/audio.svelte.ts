@@ -145,6 +145,39 @@ function report(cause: unknown): void {
       : String(cause)
 }
 
+/** Whether a reading would describe the graph before our own write. */
+function holdingOff(): boolean {
+  return (
+    inflight > 0 ||
+    deviceTimers.size > 0 ||
+    streamTimers.size > 0 ||
+    Date.now() < quietUntil
+  )
+}
+
+let catchUpTimer: ReturnType<typeof setTimeout> | undefined
+
+/**
+ * Fetch once the window has passed.
+ *
+ * An event held back is gone: the daemon publishes on change, so
+ * nothing re-sends it. A stream starting while a slider is settling
+ * would otherwise not appear until something else happened to change
+ * -- which, on a parked car, could be a long time.
+ */
+function catchUp(): void {
+  if (catchUpTimer) return
+
+  catchUpTimer = setTimeout(() => {
+    catchUpTimer = undefined
+    if (holdingOff()) {
+      catchUp()
+      return
+    }
+    refresh()
+  }, QUIET_AFTER_WRITE + 50)
+}
+
 /** Read everything once, for a screen that opens mid-session. */
 export async function refresh(): Promise<void> {
   try {
@@ -166,6 +199,8 @@ export async function setDefault(node_id: number): Promise<void> {
     audio.error = ''
   } catch (cause) {
     report(cause)
+  } finally {
+    quietUntil = Date.now() + QUIET_AFTER_WRITE
   }
 }
 
@@ -200,6 +235,12 @@ export function setDeviceVolume(node_id: number, percent: number): void {
         patch(node_id, { percent: volume.percent, muted: volume.muted })
       } catch (cause) {
         report(cause)
+      } finally {
+        /* The daemon echoes our own write on the stream, and that
+           echo is in flight when the response arrives. Without this
+           there is a gap between the timer clearing itself and the
+           response landing where the echo would be applied. */
+        quietUntil = Date.now() + QUIET_AFTER_WRITE
       }
     }, WRITE_DELAY),
   )
@@ -234,6 +275,8 @@ export function setStreamVolume(id: number, percent: number): void {
         })
       } catch (cause) {
         report(cause)
+      } finally {
+        quietUntil = Date.now() + QUIET_AFTER_WRITE
       }
     }, WRITE_DELAY),
   )
@@ -249,6 +292,8 @@ export async function setStreamMute(
     patchStream(id, { percent: result.percent, muted: result.muted })
   } catch (cause) {
     report(cause)
+  } finally {
+    quietUntil = Date.now() + QUIET_AFTER_WRITE
   }
 }
 
@@ -262,6 +307,8 @@ export async function setDeviceMute(
     patch(node_id, { percent: volume.percent, muted: volume.muted })
   } catch (cause) {
     report(cause)
+  } finally {
+    quietUntil = Date.now() + QUIET_AFTER_WRITE
   }
 }
 
@@ -378,20 +425,14 @@ export function setMuted(muted: boolean): void {
  */
 export function watch(): () => void {
   return on('audio', (data) => {
-    const reading = data as AudioState
-
-    /* Devices carry their own levels now, so an event arriving while
-       a slider is being dragged would describe them as they were.
-       Held back for the same window as the volume. */
-    if (
-      inflight > 0 ||
-      deviceTimers.size ||
-      streamTimers.size ||
-      Date.now() < quietUntil
-    ) {
+    /* Held back while a write is settling: the reading would
+       describe things as they were before it. */
+    if (holdingOff()) {
+      catchUp()
       return
     }
 
+    const reading = data as AudioState
     audio.streams = reading.streams
     audio.devices = reading.devices
     audio.mic = reading.microphone.percent

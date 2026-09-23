@@ -354,12 +354,19 @@ async def watch() -> AsyncIterator[AudioState]:
         async for raw in process.stdout:
             line = raw.decode(errors='replace')
 
-            # Sinks and sources for volume, cards for a device being
-            # plugged in or a Bluetooth phone connecting, the server
-            # for the default moving. Clients and streams are the rest
-            # of the feed and change none of this.
+            # Sinks and sources for device volume, cards for
+            # something being plugged in or a phone connecting, the
+            # server for the default moving, and sink-inputs and
+            # source-outputs for an application starting, stopping or
+            # changing its own level.
+            #
+            # pactl's names, not PipeWire's: a sink-input is what an
+            # application plays into, which is the stream this reports
+            # as one of `streams`. Leaving it out is why a new source
+            # did not appear until something else happened to be read.
             if not any(marker in line for marker in
                        ('on sink #', 'on source #', 'on card #',
+                        'on sink-input #', 'on source-output #',
                         'on server')):
                 continue
 
