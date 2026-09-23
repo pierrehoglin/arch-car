@@ -19,6 +19,7 @@ Requires pipewire and wireplumber, both already needed for audio.
 """
 
 import json
+import math
 import asyncio
 from dataclasses import dataclass, asdict
 
@@ -39,6 +40,11 @@ class Node:
     media_class: str = ''
     state: str = ''
     binary: str = ''
+    # None where the graph did not report a volume -- params are not
+    # always enumerated, and a node that has never played may have
+    # none. Distinguished from zero, which is a real silence.
+    percent: int | None = None
+    muted: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -77,6 +83,47 @@ async def _run(*args: str, timeout: float = 5.0) -> str:
     return out.decode(errors='replace')
 
 
+def _linear(cubed: float) -> int:
+    """A stored channel volume as the percentage a person means."""
+    return round(math.cbrt(max(0.0, cubed)) * 100)
+
+
+def _volume_of(info: dict) -> tuple[int | None, bool]:
+    """
+    A node's level, out of info.params.Props.
+
+    channelVolumes holds one float per channel, where 1.0 is full.
+    The loudest channel is taken: the alternative is an average, and
+    a node panned hard to one side would then read as half volume.
+
+    The values are cubed. A node at 80% stores 0.512, and at 32% it
+    stores 0.033 -- so reading them directly makes everything look far
+    quieter than it is, and worse the lower it goes. The cube root
+    undoes it.
+
+    Note this is the opposite of `wpctl`, which prints the linear
+    value: [vol: 0.47] really is 47%. Device levels come from wpctl
+    and need no correction; only what is read out of the graph does.
+    """
+    params = info.get('params') or {}
+    entries = params.get('Props') or []
+    if not entries or not isinstance(entries[0], dict):
+        return None, False
+
+    props = entries[0]
+    volumes = props.get('channelVolumes')
+    muted = bool(props.get('mute', False))
+
+    if not isinstance(volumes, list) or not volumes:
+        # Mono nodes and some filters report a single volume instead.
+        single = props.get('volume')
+        if isinstance(single, (int, float)):
+            return _linear(float(single)), muted
+        return None, muted
+
+    return _linear(max(float(v) for v in volumes)), muted
+
+
 def parse_nodes(text: str) -> list[Node]:
     """
     Pull audio nodes out of `pw-dump` output.
@@ -84,6 +131,11 @@ def parse_nodes(text: str) -> list[Node]:
     pw-dump emits every object on the graph -- nodes, ports, links,
     devices, factories. Only Node objects with a media class matter
     here, and properties are nested under info.props.
+
+    Volume comes from the same objects, under info.params.Props, so
+    reading it costs nothing beyond the call already being made. A
+    wpctl invocation per stream would be a subprocess each, several
+    times a second while a slider is moving.
     """
     try:
         objects = json.loads(text)
@@ -107,6 +159,8 @@ def parse_nodes(text: str) -> list[Node]:
         if not media_class:
             continue
 
+        percent, muted = _volume_of(info)
+
         nodes.append(Node(
             id=int(entry.get('id', 0)),
             name=props.get('node.name', ''),
@@ -114,6 +168,8 @@ def parse_nodes(text: str) -> list[Node]:
             media_class=media_class,
             state=info.get('state', ''),
             binary=props.get('application.process.binary', ''),
+            percent=percent,
+            muted=muted,
         ))
 
     return nodes

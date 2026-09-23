@@ -566,6 +566,16 @@ async def post_device_mute(node_id: int, body: MuteBody) -> dict:
     return await routes.audio_device_mute(node_id, body.muted)
 
 
+@api.post('/audio/streams/{node_id}/volume')
+async def post_stream_volume(node_id: int, body: VolumeBody) -> dict:
+    return await routes.audio_stream_volume(node_id, body.percent)
+
+
+@api.post('/audio/streams/{node_id}/mute')
+async def post_stream_mute(node_id: int, body: MuteBody) -> dict:
+    return await routes.audio_stream_mute(node_id, bool(body.muted))
+
+
 @api.get('/audio/microphone')
 async def get_audio_microphone() -> dict:
     return await routes.audio_microphone()

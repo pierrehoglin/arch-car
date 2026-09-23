@@ -20,7 +20,7 @@ from carlib.core.errors import (
 from carlib.location import geocoding, places
 from carlib.navigation import routing
 from carlib.radio import fm
-from carlib.system import audio, bluetooth, source
+from carlib.system import audio, bluetooth, pipewire, source
 
 # Library exceptions to HTTP status. Anything unmapped is a 500, which
 # is correct: an unexpected exception is a bug here, not a client
@@ -303,6 +303,31 @@ async def audio_device_mute(node_id: int, muted: bool | None) -> dict:
     if muted is None:
         return (await audio.toggle_mute(str(node_id))).to_dict()
     return (await audio.set_muted(muted, str(node_id))).to_dict()
+
+
+async def audio_stream_volume(node_id: int, percent: int) -> dict:
+    """
+    Level one application against the others.
+
+    WirePlumber remembers these by application name, so setting FM
+    down once holds across restarts -- which is the point. Levelling
+    that had to be redone every boot would not be worth having.
+    """
+    if not await pipewire.exists(node_id):
+        raise NotFoundError('stream', str(node_id), [])
+
+    await pipewire.set_volume(node_id, percent)
+    level, muted = await pipewire.get_volume(node_id)
+    return {'node_id': node_id, 'percent': level, 'muted': muted}
+
+
+async def audio_stream_mute(node_id: int, muted: bool) -> dict:
+    if not await pipewire.exists(node_id):
+        raise NotFoundError('stream', str(node_id), [])
+
+    await pipewire.set_mute(node_id, muted)
+    level, is_muted = await pipewire.get_volume(node_id)
+    return {'node_id': node_id, 'percent': level, 'muted': is_muted}
 
 
 async def audio_microphone() -> dict:

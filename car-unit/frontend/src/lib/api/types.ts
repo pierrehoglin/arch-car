@@ -129,11 +129,26 @@ export interface AudioDevice {
   muted: boolean
 }
 
+/** An application producing sound. */
+export interface AudioStream {
+  id: number
+  name: string
+  application: string
+  media_class: string
+  state: string
+  binary: string
+  /** Null where the graph reported no level -- distinct from zero,
+   *  which is a real silence. */
+  percent: number | null
+  muted: boolean
+}
+
 /** Everything the audio graph reports, as one reading. */
 export interface AudioState {
   volume: Volume
   microphone: Volume
   devices: AudioDevice[]
+  streams: AudioStream[]
 }
 
 /** A saved location, mirroring carlib.location.places.Place. */

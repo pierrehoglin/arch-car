@@ -188,11 +188,48 @@ export function runScan(identify: boolean): Signal[] {
 
 /* The whole reading, which is what both /api/audio and the stream
    send -- one shape, so a screen can start from either. */
+/* What is playing. Named as the graph names them -- carlib labels
+   its own node, and spotifyd arrives through the ALSA plugin, which
+   labels the stream after the plugin. The frontend maps those to
+   something readable. */
+let audioStreams = [
+  { id: 73, name: 'spotifyd', application: 'PipeWire ALSA [spotifyd]',
+    media_class: 'Stream/Output/Audio', state: 'running',
+    binary: 'spotifyd', percent: 62, muted: false },
+  { id: 91, name: 'carlib-fm', application: 'carlib-fm',
+    media_class: 'Stream/Output/Audio', state: 'idle',
+    binary: 'rtl_fm', percent: 38, muted: false },
+]
+
 export const audioState = () => ({
   volume: { ...volume },
   microphone: { ...mic },
   devices: audioDevices.map((device) => ({ ...device })),
+  streams: audioStreams.map((stream) => ({ ...stream })),
 })
+
+export const allStreams = () => audioStreams
+
+export function setStreamVolume(id: number, percent: number) {
+  const level = Math.max(0, Math.min(100, Math.round(percent)))
+  audioStreams = audioStreams.map((stream) =>
+    stream.id === id ? { ...stream, percent: level, muted: false } : stream,
+  )
+  audioChanged()
+  const changed = audioStreams.find((stream) => stream.id === id)
+  return { node_id: id, percent: changed?.percent ?? 0,
+           muted: changed?.muted ?? false }
+}
+
+export function setStreamMute(id: number, muted: boolean) {
+  audioStreams = audioStreams.map((stream) =>
+    stream.id === id ? { ...stream, muted } : stream,
+  )
+  audioChanged()
+  const changed = audioStreams.find((stream) => stream.id === id)
+  return { node_id: id, percent: changed?.percent ?? 0,
+           muted: changed?.muted ?? false }
+}
 
 export const currentVolume = () => volume
 

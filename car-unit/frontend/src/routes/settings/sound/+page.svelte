@@ -6,14 +6,18 @@
   import Slider from '$lib/ui/Slider.svelte'
   import {
     audio,
+    nameOf,
+    playing,
     refresh,
     setDefault,
     setDeviceMute,
     setDeviceVolume,
+    setStreamMute,
+    setStreamVolume,
     sinks,
     sources,
   } from '$lib/audio.svelte'
-  import type { AudioDevice } from '$lib/api/types'
+  import type { AudioDevice, AudioStream } from '$lib/api/types'
 
   /* The root layout follows audio for the whole session, so this
      screen only reads. The one fetch covers a screen opened before
@@ -24,6 +28,7 @@
 
   const outputs = $derived(sinks())
   const inputs = $derived(sources())
+  const apps = $derived(playing())
 
   /* PipeWire names carry the driver and the profile -- "CORSAIR
      VIRTUOSO XT Wireless Gaming Receiver Analog Stereo". The tail is
@@ -36,10 +41,10 @@
       .trim()
   }
 
-  const speaker = (device: AudioDevice) =>
+  const speaker = (device: { muted: boolean; percent: number | null }) =>
     device.muted
       ? 'muted'
-      : device.percent === 0
+      : !device.percent
         ? 'volume-zero'
         : device.percent <= 33
           ? 'volume-low'
@@ -90,6 +95,39 @@
 
 <Card eyebrow="Input" gap="none" trim>
   {@render devices(inputs, 'No microphone on the graph')}
+</Card>
+
+<Card eyebrow="Playing now" gap="none" trim>
+  {#if apps.length}
+    {#each apps as stream (stream.id)}
+      <!-- Levelled against each other rather than against the
+           output: FM is broadcast-compressed and arrives far louder
+           than anything streamed, and WirePlumber remembers the
+           difference by application. -->
+      <Row title={nameOf(stream)}>
+        <div class="level">
+          <Slider
+            label="{nameOf(stream)} level"
+            value={stream.muted ? 0 : (stream.percent ?? 0)}
+            readout="{stream.muted ? 0 : (stream.percent ?? 0)}%"
+            oninput={(percent) => setStreamVolume(stream.id, percent)}
+          />
+        </div>
+
+        <Button
+          variant="quiet"
+          square
+          pressed={stream.muted}
+          label="{stream.muted ? 'Unmute' : 'Mute'} {nameOf(stream)}"
+          onclick={() => setStreamMute(stream.id, !stream.muted)}
+        >
+          <Icon name={speaker(stream)} size={22} />
+        </Button>
+      </Row>
+    {/each}
+  {:else}
+    <Row title="Nothing playing" />
+  {/if}
 </Card>
 
 {#if audio.error}

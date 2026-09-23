@@ -18,9 +18,10 @@ import re
 import asyncio
 import contextlib
 from typing import AsyncIterator
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 
 from carlib.core.errors import CarError, NotAvailableError
+from carlib.system import pipewire
 
 WPCTL = 'wpctl'
 
@@ -29,6 +30,11 @@ SOURCE = '@DEFAULT_AUDIO_SOURCE@'
 
 # wpctl caps at 1.0 by default but will go higher, which distorts.
 MAX_VOLUME = 100
+
+# How long to let a burst of events settle before reading the graph.
+# Short enough to feel immediate, long enough that one drag of a
+# slider is one reading rather than a dozen.
+COALESCE = 0.15
 
 
 @dataclass
@@ -251,12 +257,17 @@ class AudioState:
     volume: Volume
     microphone: Volume
     devices: list[AudioDevice]
+    # What is playing, so each application can be levelled against
+    # the others -- broadcast FM is compressed far louder than
+    # anything streamed.
+    streams: list[pipewire.Node] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
             'volume': self.volume.to_dict(),
             'microphone': self.microphone.to_dict(),
             'devices': [device.to_dict() for device in self.devices],
+            'streams': [stream.to_dict() for stream in self.streams],
         }
 
 
@@ -288,10 +299,18 @@ async def state() -> AudioState:
     Only `devices()` is allowed to fail here. If wpctl cannot be run
     at all that is worth reporting, but a missing default is not.
     """
+    try:
+        playing = await pipewire.streams()
+    except CarError:
+        # pw-dump is a second tool; losing it should not take the
+        # devices with it.
+        playing = []
+
     return AudioState(
         volume=await _reading(SINK),
         microphone=await _reading(SOURCE),
         devices=await devices(),
+        streams=playing,
     )
 
 
@@ -343,6 +362,22 @@ async def watch() -> AsyncIterator[AudioState]:
                        ('on sink #', 'on source #', 'on card #',
                         'on server')):
                 continue
+
+            # pactl reports several lines per change, and a slider
+            # being dragged produces a run of them. Waiting a beat and
+            # taking whatever else has arrived turns a burst into one
+            # reading -- which now means one wpctl and one pw-dump
+            # rather than a pair per line.
+            await asyncio.sleep(COALESCE)
+            while True:
+                try:
+                    more = await asyncio.wait_for(
+                        process.stdout.readline(), timeout=0.01)
+                except asyncio.TimeoutError:
+                    break
+                if not more:
+                    # pactl has gone; the outer loop will notice.
+                    break
 
             try:
                 current = await state()

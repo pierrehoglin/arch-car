@@ -144,6 +144,26 @@ export const handlers = [
     )
   }),
 
+  http.post('/api/audio/streams/:node_id/volume', async (
+    { params, request },
+  ) => {
+    const { percent } = await body<{ percent: number }>(request)
+    await wait(NORMAL_MS)
+    return HttpResponse.json(
+      device.setStreamVolume(Number(params.node_id), percent),
+    )
+  }),
+
+  http.post('/api/audio/streams/:node_id/mute', async (
+    { params, request },
+  ) => {
+    const { muted } = await body<{ muted?: boolean }>(request)
+    await wait(NORMAL_MS)
+    return HttpResponse.json(
+      device.setStreamMute(Number(params.node_id), !!muted),
+    )
+  }),
+
   http.get('/api/audio/microphone', async () => {
     await wait(NORMAL_MS)
     return HttpResponse.json(device.currentMicrophone())

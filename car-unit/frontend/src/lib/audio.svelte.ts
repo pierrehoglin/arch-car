@@ -1,7 +1,12 @@
 import * as api from './api/audio'
 import { on } from './api/stream.svelte'
 import { RequestFailed } from './api/client'
-import type { AudioDevice, AudioState, Volume } from './api/types'
+import type {
+  AudioDevice,
+  AudioState,
+  AudioStream,
+  Volume,
+} from './api/types'
 
 /* The volume, shared by everything that shows or changes it.
  *
@@ -36,6 +41,8 @@ interface Store {
   micMuted: boolean
   /** Every sink and source, with the default of each marked. */
   devices: AudioDevice[]
+  /** What is playing, so each can be levelled against the others. */
+  streams: AudioStream[]
   /** Whether the daemon has ever answered, so a screen can tell a
    *  real reading from the default. */
   known: boolean
@@ -48,6 +55,7 @@ export const audio = $state<Store>({
   mic: 50,
   micMuted: false,
   devices: [],
+  streams: [],
   known: false,
   error: '',
 })
@@ -58,6 +66,27 @@ export const sinks = () =>
 
 export const sources = () =>
   audio.devices.filter((device) => device.kind === 'source')
+
+/* Only what is actually producing. The graph keeps a node for a
+   moment after an application stops, and a row for something that
+   has gone is a control that does nothing. */
+export const playing = () =>
+  audio.streams.filter((stream) => stream.percent !== null)
+
+/** A stream's name as it is worth reading. */
+export function nameOf(stream: AudioStream): string {
+  const raw = stream.application || stream.name || stream.binary
+  return NAMES[raw] ?? raw
+}
+
+/* What the graph calls them against what they are. carlib names its
+   own nodes, and spotifyd reaches PipeWire through the ALSA plugin,
+   which labels the stream after the plugin rather than the player. */
+const NAMES: Record<string, string> = {
+  'carlib-fm': 'FM radio',
+  spotifyd: 'Spotify',
+  'PipeWire ALSA [spotifyd]': 'Spotify',
+}
 
 
 /* None of this is $state: an $effect reading any of it would re-run
@@ -93,6 +122,7 @@ function apply(volume: Volume): void {
    taken even while a write is settling: a write changes the volume,
    never the device list, so there is nothing for them to contradict. */
 function applyState(reading: AudioState): void {
+  if (!streamTimers.size) audio.streams = reading.streams
   if (!deviceTimers.size) audio.devices = reading.devices
   audio.mic = reading.microphone.percent
   audio.micMuted = reading.microphone.muted
@@ -164,6 +194,53 @@ export function setDeviceVolume(node_id: number, percent: number): void {
       }
     }, WRITE_DELAY),
   )
+}
+
+/* A write per stream, each with its own debounce, for the same
+   reason as devices: two levels moved in one session must not cancel
+   each other. */
+const streamTimers = new Map<number, ReturnType<typeof setTimeout>>()
+
+function patchStream(id: number, change: Partial<AudioStream>): void {
+  audio.streams = audio.streams.map((stream) =>
+    stream.id === id ? { ...stream, ...change } : stream,
+  )
+}
+
+/** Set one application's level. Applies at once; the write follows. */
+export function setStreamVolume(id: number, percent: number): void {
+  const level = clamp(percent)
+  patchStream(id, { percent: level, muted: false })
+
+  clearTimeout(streamTimers.get(id))
+  streamTimers.set(
+    id,
+    setTimeout(async () => {
+      streamTimers.delete(id)
+      try {
+        const result = await api.setStreamVolume(id, level)
+        patchStream(id, {
+          percent: result.percent,
+          muted: result.muted,
+        })
+      } catch (cause) {
+        report(cause)
+      }
+    }, WRITE_DELAY),
+  )
+}
+
+export async function setStreamMute(
+  id: number,
+  muted: boolean,
+): Promise<void> {
+  patchStream(id, { muted })
+  try {
+    const result = await api.setStreamMute(id, muted)
+    patchStream(id, { percent: result.percent, muted: result.muted })
+  } catch (cause) {
+    report(cause)
+  }
 }
 
 export async function setDeviceMute(
@@ -297,10 +374,16 @@ export function watch(): () => void {
     /* Devices carry their own levels now, so an event arriving while
        a slider is being dragged would describe them as they were.
        Held back for the same window as the volume. */
-    if (inflight > 0 || deviceTimers.size || Date.now() < quietUntil) {
+    if (
+      inflight > 0 ||
+      deviceTimers.size ||
+      streamTimers.size ||
+      Date.now() < quietUntil
+    ) {
       return
     }
 
+    audio.streams = reading.streams
     audio.devices = reading.devices
     audio.mic = reading.microphone.percent
     audio.micMuted = reading.microphone.muted

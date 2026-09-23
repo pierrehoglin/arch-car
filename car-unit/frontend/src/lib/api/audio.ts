@@ -41,6 +41,22 @@ export const setDeviceMute = (node_id: number, muted?: boolean) =>
     body: { muted },
   })
 
+/* One application's level.
+ *
+ * WirePlumber remembers these by application name, so a source set
+ * quieter once stays that way across restarts. */
+export const setStreamVolume = (node_id: number, percent: number) =>
+  request<{ node_id: number; percent: number; muted: boolean }>(
+    `/audio/streams/${node_id}/volume`,
+    { method: 'POST', body: { percent } },
+  )
+
+export const setStreamMute = (node_id: number, muted: boolean) =>
+  request<{ node_id: number; percent: number; muted: boolean }>(
+    `/audio/streams/${node_id}/mute`,
+    { method: 'POST', body: { muted } },
+  )
+
 export const microphone = () => request<Volume>('/audio/microphone')
 
 export const setMicrophone = (percent: number) =>
