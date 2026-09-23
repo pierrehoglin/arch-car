@@ -268,6 +268,22 @@ async def managed_objects() -> dict[str, dict[str, Any]]:
     return await manager.get_managed_objects()
 
 
+def _device_of(path: str) -> str:
+    """
+    The device a nested object belongs to.
+
+    Everything BlueZ hangs off a device -- players, transports,
+    endpoints -- lives somewhere under /org/bluez/hciN/dev_XX..., at
+    whatever depth that version chose. Cutting at the dev_ segment
+    finds the owner without having to know the depth.
+    """
+    parts = path.split('/')
+    for index, part in enumerate(parts):
+        if part.startswith('dev_'):
+            return '/'.join(parts[:index + 1])
+    return ''
+
+
 async def inventory() -> list[Device]:
     """
     Every device BlueZ knows about, connected first.
@@ -277,12 +293,25 @@ async def inventory() -> list[Device]:
     """
     objects = await managed_objects()
 
-    # Index players by their parent device path first.
+    # Index players by the device they belong to.
+    #
+    # Not simply the parent path: BlueZ nests the player under an
+    # `avrcp` node --
+    #
+    #     /org/bluez/hci0/dev_XX_XX_XX_XX_XX_XX/avrcp/player0
+    #
+    # so the parent is the avrcp node, not the device. Taking the
+    # path up to and including dev_... works for both that and the
+    # older /dev_XX/player0 layout.
     raw_players: dict[str, tuple[str, dict]] = {}
     for path, interfaces in objects.items():
         mp = interfaces.get(IFACE_PLAYER)
-        if mp is not None:
-            raw_players[path.rsplit('/', 1)[0]] = (path, props(mp))
+        if mp is None:
+            continue
+
+        owner = _device_of(path)
+        if owner:
+            raw_players[owner] = (path, props(mp))
 
     devices: list[Device] = []
     for path, interfaces in objects.items():
