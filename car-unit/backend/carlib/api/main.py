@@ -45,6 +45,12 @@ _autostart_task: asyncio.Task | None = None
 _geocoder: asyncio.Task | None = None
 _audio_watch: asyncio.Task | None = None
 _bluetooth_watch: asyncio.Task | None = None
+_media_watch: asyncio.Task | None = None
+
+# How often to look at what is playing. Often enough that a track
+# change on the phone reaches the screen before the song does,
+# rarely enough to be free -- each pass is two subprocess calls.
+MEDIA_POLL = 2.0
 
 # The daemon's one pairing session: the agent, the window, and
 # whatever is waiting on an answer. Created here, and only here,
@@ -161,6 +167,48 @@ async def _watch_audio() -> None:
             await asyncio.sleep(10)
 
 
+async def _watch_media() -> None:
+    """
+    Publish what each source is playing.
+
+    Polled rather than pushed: neither AVRCP nor MPRIS signals a
+    position change, and a track change arrives as a property update
+    we would have to subscribe to twice, once per transport. Reading
+    both on a timer is less machinery for the same result.
+
+    Position is deliberately left out of the comparison. It moves
+    every second by definition, and publishing on it would be a
+    message a second for the life of the ignition -- the screen
+    extrapolates instead, from the last reading and the status.
+    """
+    last: dict[str, tuple] = {}
+
+    while True:
+        try:
+            for which in (source.BLUETOOTH, source.SPOTIFY):
+                try:
+                    playing = await source.now_playing(which)
+                except CarError:
+                    continue
+
+                # The same comparison the command uses to decide a
+                # player has caught up. Two definitions of "changed"
+                # would mean a command that returned fresh state the
+                # watcher then declined to publish.
+                signature = source.signature(playing)
+
+                if last.get(which) != signature:
+                    last[which] = signature
+                    events.events.publish('media', playing.to_dict())
+
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception('media watch failed')
+
+        await asyncio.sleep(MEDIA_POLL)
+
+
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
     # Take ownership of runtime state before anything can read it.
@@ -168,13 +216,14 @@ async def lifespan(app: FastAPI):
     log.info('carlib daemon starting; state held in memory')
 
     global _supervisor, _autostart_task, _geocoder, _audio_watch
-    global _bluetooth_watch
+    global _bluetooth_watch, _media_watch
 
     _supervisor = asyncio.create_task(_run_supervisor())
     _autostart_task = asyncio.create_task(_autostart())
     _geocoder = asyncio.create_task(_run_geocoder())
     _audio_watch = asyncio.create_task(_watch_audio())
     _bluetooth_watch = asyncio.create_task(pairing.run())
+    _media_watch = asyncio.create_task(_watch_media())
 
     yield
 
@@ -185,7 +234,7 @@ async def lifespan(app: FastAPI):
     events.events.shutdown()
 
     for task in (_autostart_task, _geocoder, _audio_watch,
-                 _bluetooth_watch, _supervisor):
+                 _bluetooth_watch, _media_watch, _supervisor):
         if task is not None:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -657,6 +706,34 @@ async def post_disconnect(address: str) -> dict:
 @api.delete('/bluetooth/devices/{address}')
 async def delete_device(address: str) -> dict:
     return await routes.bluetooth_forget(address)
+
+
+# --- Media ------------------------------------------------------------------
+
+@api.get('/media/{which}')
+async def get_media(which: str) -> dict:
+    """
+    What a source is playing: bluetooth, spotify, or a player name.
+
+    A source with nothing playing reports `present` false rather than
+    failing -- a phone that has not started anything is the ordinary
+    state, not an error.
+    """
+    return await routes.media_now(which)
+
+
+@api.post('/media/{which}/{action}')
+async def post_media(which: str, action: str) -> dict:
+    """
+    play, pause, stop, next, prev, forward or rewind.
+
+    Returns once the player has caught up, and publishes the same
+    reading -- so every screen settles together rather than the one
+    that pressed the button being a poll ahead of the others.
+    """
+    playing = await routes.media_command(which, action)
+    events.events.publish('media', playing)
+    return playing
 
 
 # --- Events -----------------------------------------------------------------

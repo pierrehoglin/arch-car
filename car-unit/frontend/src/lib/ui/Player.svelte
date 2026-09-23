@@ -16,8 +16,12 @@
     length: number
     position?: number
     playing?: boolean
-    /** Two colours for the artwork placeholder, so each source is
-     *  recognisable at a glance without a logo. */
+    /** Cover art, where the source publishes any. MPRIS does;
+     *  AVRCP does not -- the profile can carry it, but BlueZ does
+     *  not expose it. */
+    art?: string
+    /** Two colours standing in for artwork when there is none, so
+     *  each source is recognisable at a glance without a logo. */
     tint?: [string, string]
     /** Often empty: a queue needs AVRCP browsing over Bluetooth,
      *  which Android supports and iOS does not. */
@@ -37,6 +41,7 @@
     length,
     position = 0,
     playing = false,
+    art = '',
     tint = ['#e0b45a', '#b06fd0'],
     queue = [],
     onplay,
@@ -53,14 +58,21 @@
   const elapsed = $derived(length > 0 ? (position / length) * 100 : 0)
 </script>
 
-<!-- A gradient stands in for artwork. Bluetooth rarely sends any, and
-     an empty grey square reads as broken. -->
+<!-- The cover where there is one, a gradient where there is not.
+     Bluetooth never sends artwork, and a source with no picture
+     should still look like something rather than a hole.
+
+     The image is allowed to fail quietly: it comes from the
+     provider's CDN, and a car without signal is the normal case, not
+     an error worth showing. -->
 <div
   class="art"
   style:--from={tint[0]}
   style:--to={tint[1]}
 >
-  <Icon name="note" size={56} />
+  {#if art}
+    <img src={art} alt="" onerror={(e) => (e.currentTarget.hidden = true)} />
+  {/if}
 </div>
 
 <div class="titles">
@@ -117,6 +129,13 @@
 {/if}
 
 <style>
+  .art img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: inherit;
+  }
+
   .art {
     display: grid;
     place-items: center;

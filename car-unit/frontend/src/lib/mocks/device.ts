@@ -521,3 +521,121 @@ export function btForget(address: string) {
   bt = bt.filter((device) => device.address !== address.toUpperCase())
   btChanged()
 }
+
+
+/* What each source is playing.
+ *
+ * Position advances with the clock so the progress bar has something
+ * to do, and the track changes on its own after a while -- the two
+ * things the screen has to cope with that a static fixture never
+ * shows.
+ */
+
+const TRACKS = [
+  { title: 'Burn (feat. Séb Mont)', artist: 'LUM!X, Séb Mont',
+    album: 'Burn', duration: 144969,
+    art: 'https://i.scdn.co/image/ab67616d0000b2739d60ccaa57b55b5543f6e700' },
+  { title: 'Redbone', artist: 'Childish Gambino',
+    album: 'Awaken, My Love!', duration: 326933, art: '' },
+  { title: 'Alright', artist: 'Kendrick Lamar',
+    album: 'To Pimp a Butterfly', duration: 219333, art: '' },
+]
+
+interface Playing {
+  source: string
+  device: string
+  status: string
+  index: number
+  position: number
+  since: number
+  present: boolean
+}
+
+const playing: Record<string, Playing> = {
+  bluetooth: {
+    source: 'bluetooth', device: 'Pierre Pixel', status: 'playing',
+    index: 0, position: 34496, since: Date.now(), present: true,
+  },
+  spotify: {
+    source: 'spotify', device: 'spotifyd', status: 'paused',
+    index: 1, position: 61000, since: Date.now(), present: true,
+  },
+}
+
+/** Where a source has reached, with the clock taken into account. */
+function at(state: Playing): number {
+  if (state.status !== 'playing') return state.position
+  return state.position + (Date.now() - state.since)
+}
+
+function nowPlaying(source: string) {
+  const state = playing[source]
+  if (!state) {
+    return {
+      source, device: '', status: '', title: '', artist: '', album: '',
+      duration: null, position: null, art: '', track_id: '',
+      present: false,
+    }
+  }
+
+  const track = TRACKS[state.index % TRACKS.length]
+  let position = at(state)
+
+  // Round to the next track when this one runs out, as a real player
+  // would.
+  if (position >= track.duration) {
+    state.index = (state.index + 1) % TRACKS.length
+    state.position = 0
+    state.since = Date.now()
+    position = 0
+    emit('media', nowPlaying(source))
+  }
+
+  const current = TRACKS[state.index % TRACKS.length]
+  return {
+    source,
+    device: state.device,
+    status: state.status,
+    title: current.title,
+    artist: current.artist,
+    album: current.album,
+    duration: current.duration,
+    position: Math.round(position),
+    // Only Spotify publishes art; AVRCP never does.
+    art: source === 'spotify' ? current.art : '',
+    track_id: `${source}/${state.index}`,
+    present: state.present,
+  }
+}
+
+export const mediaNow = nowPlaying
+
+export function mediaCommand(source: string, action: string) {
+  const state = playing[source]
+  if (!state) return nowPlaying(source)
+
+  const here = at(state)
+
+  if (action === 'play' || (action === 'toggle' && state.status !== 'playing')) {
+    state.position = here
+    state.since = Date.now()
+    state.status = 'playing'
+  } else if (action === 'pause' || action === 'stop') {
+    state.position = action === 'stop' ? 0 : here
+    state.since = Date.now()
+    state.status = action === 'stop' ? 'stopped' : 'paused'
+  } else if (action === 'next' || action === 'prev') {
+    const step = action === 'next' ? 1 : -1
+    state.index = (state.index + step + TRACKS.length) % TRACKS.length
+    state.position = 0
+    state.since = Date.now()
+  } else if (action === 'forward' || action === 'rewind') {
+    const step = action === 'forward' ? 10_000 : -10_000
+    state.position = Math.max(0, here + step)
+    state.since = Date.now()
+  }
+
+  const reading = nowPlaying(source)
+  emit('media', reading)
+  return reading
+}

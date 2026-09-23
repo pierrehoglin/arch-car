@@ -38,7 +38,8 @@ from dataclasses import dataclass, field, asdict
 from typing import AsyncIterator
 
 from carlib.core import settings, state
-from carlib.core.errors import NotAvailableError, NotFoundError
+from carlib.core.errors import (CarError, NotAvailableError,
+                                NotFoundError)
 
 PLAYERCTL = 'playerctl'
 
@@ -163,6 +164,17 @@ class Player:
     artist: str = ''
     title: str = ''
     album: str = ''
+    # Milliseconds. MPRIS reports microseconds; converted on the way
+    # in so every caller works in the same unit as AVRCP, which
+    # already uses milliseconds.
+    duration: int | None = None
+    position: int | None = None
+    # A URL, usually on the provider's CDN. Empty for anything that
+    # does not publish one -- AVRCP never does.
+    art: str = ''
+    # Changes per track, so a screen can tell a new song from the same
+    # one playing on.
+    track_id: str = ''
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -223,6 +235,20 @@ async def _run(*args: str, timeout: float = 5.0) -> str:
     return out.decode(errors='replace')
 
 
+def _micros(raw: str) -> int | None:
+    """
+    Microseconds from playerctl as milliseconds.
+
+    Absent for a player with no track, and playerctl prints the
+    placeholder rather than an empty field when a variable does not
+    resolve -- so anything that is not a number is nothing.
+    """
+    text = raw.strip()
+    if not text or not text.isdigit():
+        return None
+    return int(text) // 1000
+
+
 def parse_players(text: str) -> list[Player]:
     """
     Parse the output of `playerctl -a metadata --format ...`.
@@ -238,7 +264,7 @@ def parse_players(text: str) -> list[Player]:
         if not line.strip():
             continue
         parts = line.split(FIELD_SEP)
-        while len(parts) < 5:
+        while len(parts) < 9:
             parts.append('')
 
         name = parts[0].strip()
@@ -251,6 +277,10 @@ def parse_players(text: str) -> list[Player]:
             artist=parts[2].strip(),
             title=parts[3].strip(),
             album=parts[4].strip(),
+            duration=_micros(parts[5]),
+            position=_micros(parts[6]),
+            art=parts[7].strip(),
+            track_id=parts[8].strip(),
         ))
 
     return players
@@ -261,6 +291,8 @@ async def mpris_players() -> list[Player]:
     fmt = FIELD_SEP.join((
         '{{playerName}}', '{{status}}',
         '{{artist}}', '{{title}}', '{{album}}',
+        '{{mpris:length}}', '{{position}}',
+        '{{mpris:artUrl}}', '{{mpris:trackid}}',
     ))
     try:
         out = await _run(PLAYERCTL, '-a', 'metadata', '--format', fmt)
@@ -612,3 +644,214 @@ async def supervise(interval: float = POLL_INTERVAL,
                                 if p.playing}
 
         await asyncio.sleep(ta_interval)
+
+
+# --- One shape for every player ---------------------------------------------
+#
+# AVRCP and MPRIS carry the same things under different names, so the
+# screens differ only in which one they read. AVRCP has no artwork --
+# the profile can carry it, but BlueZ does not expose it -- and
+# neither has a queue.
+
+BLUETOOTH = 'bluetooth'
+SPOTIFY = 'spotify'
+
+# AVRCP's set, which is the smaller of the two. MPRIS gets the same
+# words through playerctl, with `prev` spelled out on the way.
+ACTIONS = ('play', 'pause', 'stop', 'next', 'prev', 'forward', 'rewind')
+
+# What a source might be called on MPRIS, in the order to try.
+#
+# spotifyd is what runs on the unit; the desktop client is plain
+# `spotify`, which is what a development machine has. Both answer to
+# the same screen, so the source name covers either.
+#
+# Order matters because one name is a prefix of the other: looking for
+# `spotify` first would match spotifyd as well, and on the unit the
+# daemon would be found under the wrong name.
+CANDIDATES: dict[str, tuple[str, ...]] = {
+    SPOTIFY: ('spotifyd', 'spotify'),
+}
+
+
+@dataclass
+class NowPlaying:
+    """What a source is playing, however it was asked."""
+
+    source: str
+    # Who it is coming from: the phone's name over Bluetooth, the
+    # player's name over MPRIS.
+    device: str = ''
+    status: str = ''
+    title: str = ''
+    artist: str = ''
+    album: str = ''
+    # Milliseconds, both.
+    duration: int | None = None
+    position: int | None = None
+    art: str = ''
+    track_id: str = ''
+    # Whether anything is there at all. A phone with no media session
+    # has no player, which is not an error -- it is the ordinary state
+    # before you press play.
+    present: bool = False
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+# How long to wait for a player to catch up after a command.
+#
+# Both transports answer the command immediately and change state
+# afterwards: playerctl returns as soon as the method is dispatched,
+# and AVRCP has to reach the phone and come back. Reading straight
+# away returns what was playing before the button was pressed.
+SETTLE_TIMEOUT = 1.2
+SETTLE_INTERVAL = 0.08
+
+
+def signature(playing: 'NowPlaying') -> tuple:
+    """
+    What counts as a change worth noticing.
+
+    Position is left out deliberately. It moves every second by
+    definition, so a comparison including it would report a change
+    the moment anything was read twice.
+    """
+    return (playing.present, playing.status, playing.title,
+            playing.artist, playing.album, playing.track_id)
+
+
+def _normalise(status: str) -> str:
+    """
+    AVRCP says 'playing', MPRIS says 'Playing'.
+
+    One vocabulary out, so a screen does not have to know which
+    transport it is looking at.
+    """
+    lowered = status.strip().lower()
+    return lowered if lowered in ('playing', 'paused', 'stopped') else ''
+
+
+async def now_playing(source: str) -> NowPlaying:
+    """
+    What is playing on one source.
+
+    Never raises for an absent player: a phone that has not started
+    anything, or spotifyd with nothing queued, reports `present` false
+    rather than an error. Only a transport that cannot be reached at
+    all is worth reporting as a failure.
+    """
+    if source == BLUETOOTH:
+        return await _from_avrcp()
+    return await _from_mpris(source)
+
+
+async def _from_avrcp() -> NowPlaying:
+    from carlib.bluetooth import media
+
+    try:
+        player = await media.status()
+    except CarError:
+        return NowPlaying(source=BLUETOOTH)
+
+    return NowPlaying(
+        source=BLUETOOTH,
+        device=player.device_name,
+        status=_normalise(player.status),
+        title=player.track.title,
+        artist=player.track.artist,
+        album=player.track.album,
+        duration=player.track.duration,
+        position=player.position,
+        present=True,
+    )
+
+
+async def find_mpris(source: str) -> Player | None:
+    """
+    The MPRIS player behind a source name, if it is running.
+
+    Matched on a prefix: spotifyd registers as
+    org.mpris.MediaPlayer2.spotifyd.instance603, and playerctl reports
+    the instance suffix for some builds -- an exact match would break
+    on a restart.
+    """
+    players = await mpris_players()
+
+    for wanted in CANDIDATES.get(source, (source,)):
+        for player in players:
+            if player.name.startswith(wanted):
+                return player
+
+    return None
+
+
+async def _from_mpris(source: str) -> NowPlaying:
+    player = await find_mpris(source)
+    if player is None:
+        return NowPlaying(source=source)
+
+    return NowPlaying(
+        source=source,
+        device=player.name,
+        status=_normalise(player.status),
+        title=player.title,
+        artist=player.artist,
+        album=player.album,
+        duration=player.duration,
+        position=player.position,
+        art=player.art,
+        track_id=player.track_id,
+        present=True,
+    )
+
+
+async def command(source: str, action: str) -> NowPlaying:
+    """
+    Drive a source, whichever transport it is on.
+
+    The action names are AVRCP's, since they are the smaller set;
+    MPRIS gets the same words through playerctl.
+    """
+    before = await now_playing(source)
+
+    if source == BLUETOOTH:
+        from carlib.bluetooth import media
+        await media.control(action)
+    else:
+        # Resolved rather than assumed: the name has to be the one
+        # that is actually registered, which on a development machine
+        # is the desktop client and on the unit is the daemon.
+        player = await find_mpris(source)
+        if player is None:
+            raise NotFoundError('player', source,
+                                [p.name for p in await mpris_players()])
+
+        verb = {'prev': 'previous'}.get(action, action)
+        await _run(PLAYERCTL, '-p', player.name, verb)
+
+    return await _settled(source, signature(before))
+
+
+async def _settled(source: str, was: tuple) -> NowPlaying:
+    """
+    Read until the player has actually changed, or time runs out.
+
+    Without this the answer describes the state before the command,
+    and a screen that applies it puts the old track back over the
+    right one -- which then arrives again on the stream a moment
+    later, so the display flickers backwards and forwards.
+
+    Giving up and returning the last reading is correct for the
+    commands that change nothing: pressing pause twice, or next at
+    the end of a queue the phone will not advance past.
+    """
+    deadline = time.monotonic() + SETTLE_TIMEOUT
+    playing = await now_playing(source)
+
+    while signature(playing) == was and time.monotonic() < deadline:
+        await asyncio.sleep(SETTLE_INTERVAL)
+        playing = await now_playing(source)
+
+    return playing

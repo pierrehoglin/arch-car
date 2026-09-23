@@ -365,6 +365,22 @@ async def bluetooth_disconnect(address: str) -> dict:
     return (await bluetooth.disconnect(address)).to_dict()
 
 
+# --- Media ------------------------------------------------------------------
+#
+# One shape for both transports. AVRCP and MPRIS carry the same things
+# under different names, so the screens differ only in which source
+# they read.
+
+async def media_now(which: str) -> dict:
+    return (await source.now_playing(which)).to_dict()
+
+
+async def media_command(which: str, action: str) -> dict:
+    if action not in source.ACTIONS:
+        raise NotFoundError('action', action, list(source.ACTIONS))
+    return (await source.command(which, action)).to_dict()
+
+
 # --- Settings ---------------------------------------------------------------
 
 async def settings_all() -> dict:

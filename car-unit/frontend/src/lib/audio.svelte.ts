@@ -93,8 +93,12 @@ export function nameOf(stream: AudioStream): string {
    the stream after the plugin rather than the player. */
 const NAMES: Record<string, string> = {
   'carlib-fm': 'FM radio',
+  // The daemon on the unit; the desktop client on a development
+  // machine, which names its own node.
   spotifyd: 'Spotify',
   'PipeWire ALSA [spotifyd]': 'Spotify',
+  spotify: 'Spotify',
+  Spotify: 'Spotify',
 }
 
 
