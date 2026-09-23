@@ -31,6 +31,7 @@ from pydantic import BaseModel
 from carlib.core import settings, state
 from carlib.core.errors import CarError
 from carlib.api import events, routes
+from carlib.bluetooth.pairing import Pairing
 from carlib.location import geocoding
 from carlib.radio import fm
 from carlib.system import audio, source
@@ -41,6 +42,12 @@ _supervisor: asyncio.Task | None = None
 _autostart_task: asyncio.Task | None = None
 _geocoder: asyncio.Task | None = None
 _audio_watch: asyncio.Task | None = None
+_bluetooth_watch: asyncio.Task | None = None
+
+# The daemon's one pairing session: the agent, the window, and
+# whatever is waiting on an answer. Created here, and only here,
+# so that importing carlib never registers an agent by accident.
+pairing = Pairing(events.events.publish)
 
 
 async def _run_supervisor() -> None:
@@ -159,14 +166,17 @@ async def lifespan(app: FastAPI):
     log.info('carlib daemon starting; state held in memory')
 
     global _supervisor, _autostart_task, _geocoder, _audio_watch
+    global _bluetooth_watch
     _supervisor = asyncio.create_task(_run_supervisor())
     _autostart_task = asyncio.create_task(_autostart())
     _geocoder = asyncio.create_task(_run_geocoder())
     _audio_watch = asyncio.create_task(_watch_audio())
+    _bluetooth_watch = asyncio.create_task(pairing.run())
 
     yield
 
-    for task in (_autostart_task, _geocoder, _audio_watch, _supervisor):
+    for task in (_autostart_task, _geocoder, _audio_watch,
+                 _bluetooth_watch, _supervisor):
         if task is not None:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -259,6 +269,18 @@ class MuteBody(BaseModel):
     """`muted` omitted means toggle."""
 
     muted: bool | None = None
+
+
+class ServiceBody(BaseModel):
+    active: bool
+
+
+class WindowBody(BaseModel):
+    seconds: int = 120
+
+
+class AnswerBody(BaseModel):
+    accept: bool
 
 
 class Point(BaseModel):
@@ -519,6 +541,70 @@ async def post_audio_mute(body: MuteBody) -> dict:
 @api.get('/audio/devices')
 async def get_audio_devices() -> list[dict]:
     return await routes.audio_devices()
+
+
+# --- Bluetooth --------------------------------------------------------------
+
+@api.get('/bluetooth')
+async def get_bluetooth() -> dict:
+    """Adapter, devices, and whether a pairing window is open."""
+    return await pairing.snapshot()
+
+
+@api.post('/bluetooth/service')
+async def post_bluetooth_service(body: ServiceBody) -> dict:
+    return await routes.bluetooth_service(body.active)
+
+
+@api.post('/bluetooth/pairing-mode')
+async def post_pairing_mode(body: WindowBody) -> dict:
+    """Scan, and be discoverable and pairable, for a while."""
+    return await pairing.start(body.seconds)
+
+
+@api.delete('/bluetooth/pairing-mode')
+async def delete_pairing_mode() -> dict:
+    return await pairing.stop()
+
+
+@api.get('/bluetooth/pairing')
+async def get_pairing_request() -> dict | None:
+    """The pairing waiting for an answer, if there is one."""
+    request = pairing.pending()
+    return request.to_dict() if request else None
+
+
+@api.post('/bluetooth/pairing')
+async def post_pairing_answer(body: AnswerBody) -> dict:
+    """
+    Answer it.
+
+    `answered` is false when there was nothing waiting -- BlueZ gives
+    up after about thirty seconds, and an answer after that has
+    nowhere to go.
+    """
+    return {'answered': pairing.answer(body.accept)}
+
+
+@api.post('/bluetooth/devices/{address}/pair')
+async def post_pair(address: str) -> dict:
+    """Starts pairing and returns; progress arrives on the stream."""
+    return pairing.pair(address)
+
+
+@api.post('/bluetooth/devices/{address}/connect')
+async def post_connect(address: str) -> dict:
+    return await routes.bluetooth_connect(address)
+
+
+@api.post('/bluetooth/devices/{address}/disconnect')
+async def post_disconnect(address: str) -> dict:
+    return await routes.bluetooth_disconnect(address)
+
+
+@api.delete('/bluetooth/devices/{address}')
+async def delete_device(address: str) -> dict:
+    return await routes.bluetooth_forget(address)
 
 
 # --- Events -----------------------------------------------------------------

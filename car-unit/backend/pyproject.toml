@@ -16,9 +16,9 @@ dependencies = [
 can = ["python-can>=4.0"]
 
 [project.scripts]
+bt           = "cli.bt:main"
 bt-call      = "cli.bt_call:main"
 bt-media     = "cli.bt_media:main"
-bt-devices   = "cli.bt_devices:main"
 bt-phonebook = "cli.bt_phonebook:main"
 bt-messages  = "cli.bt_messages:main"
 gps          = "cli.gps:main"

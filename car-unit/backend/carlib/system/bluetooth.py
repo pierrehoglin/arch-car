@@ -1,19 +1,15 @@
 """
-Bluetooth power control.
+Bluetooth: the service, the adapter, and the devices on it.
 
-Two different things get called "turning Bluetooth off":
+Stateless -- each call reads what it needs from BlueZ and returns.
+Anything that has to persist between calls (a pairing window, an agent
+waiting for an answer) lives in carlib.bluetooth.pairing, which only
+the daemon runs.
 
-    radio off    Adapter1.Powered = false. Instant, keeps bluetoothd
-                 running, pairings intact, reversible in milliseconds.
-                 This is what a phone's Bluetooth toggle does.
-
-    service off  systemctl stop bluetooth. Slower, tears down the
-                 daemon, and anything holding a profile (oFono for HFP)
-                 loses its registration.
-
-Prefer the radio for a UI toggle. Use the service only when you
-actually want the daemon gone -- and remember oFono is PartOf
-bluetooth.service, so stopping it takes HFP with it.
+On and off means the service, not the radio. Stopping bluetooth.service
+tears down the daemon, and oFono is PartOf it, so HFP goes too -- which
+is what off should mean in a car. A radio toggle would leave both
+running for nothing.
 """
 
 from dataclasses import dataclass, asdict
@@ -25,6 +21,8 @@ from carlib.dbus import bluez
 from carlib.dbus.connection import system_bus
 from carlib.dbus.variants import props
 from carlib.system import services
+
+SERVICE = 'bluetooth'
 
 
 @dataclass
@@ -53,7 +51,7 @@ async def adapters() -> list[AdapterState]:
     except Exception as exc:
         raise NotAvailableError(
             f'cannot reach BlueZ: {exc}',
-            hint='is bluetooth.service running?') from exc
+            hint='bt start') from exc
 
     found = []
     for path, interfaces in objects.items():
@@ -80,15 +78,18 @@ async def default_adapter() -> AdapterState:
     return found[0]
 
 
-async def status() -> AdapterState:
-    """Adapter state plus whether the daemon is running."""
-    try:
-        svc = await services.status('bluetooth')
-        service_active = svc.active
-    except Exception:
-        service_active = False
+def _adapter(path: str) -> bluez.Adapter1:
+    return bluez.Adapter1.new_proxy(bluez.SERVICE, path, system_bus())
 
-    if not service_active:
+
+async def status() -> AdapterState:
+    """Adapter state, and whether the service is running at all."""
+    try:
+        active = (await services.status(SERVICE)).active
+    except Exception:
+        active = False
+
+    if not active:
         return AdapterState(path='', service_active=False)
 
     adapter = await default_adapter()
@@ -96,66 +97,171 @@ async def status() -> AdapterState:
     return adapter
 
 
-async def set_powered(on: bool) -> AdapterState:
-    """
-    Power the radio on or off without touching the daemon.
-
-    Powering on requires bluetooth.service to be running -- there is no
-    adapter object otherwise.
-    """
-    svc = await services.status('bluetooth')
-    if not svc.active:
-        if not on:
-            return AdapterState(path='', service_active=False)
-        await services.start('bluetooth')
-
-    adapter = await default_adapter()
-    proxy = bluez.Adapter1.new_proxy(
-        bluez.SERVICE, adapter.path, system_bus())
-
-    try:
-        await proxy.powered.set_async(on)
-    except Exception as exc:
-        raise NotAvailableError(
-            f'cannot set adapter power: {exc}',
-            hint='BlueZ needs polkit permission, or add your user to '
-                 'the lp group') from exc
-
-    return await status()
-
-
-async def toggle_power() -> AdapterState:
-    current = await status()
-    return await set_powered(not current.powered)
-
-
-async def set_discoverable(on: bool, timeout: int | None = None
-                           ) -> AdapterState:
-    """
-    Make the adapter visible to other devices.
-
-    A timeout of 0 means indefinitely, which is usually what a car unit
-    wants -- the default of 180 seconds means a passenger cannot pair
-    unless you toggle it first.
-    """
-    adapter = await default_adapter()
-    proxy = bluez.Adapter1.new_proxy(
-        bluez.SERVICE, adapter.path, system_bus())
-
-    if timeout is not None:
-        await proxy.discoverable_timeout.set_async(timeout)
-    await proxy.discoverable.set_async(on)
-    if on:
-        await proxy.pairable.set_async(True)
-
-    return await status()
-
-
 async def service_start() -> AdapterState:
-    await services.start('bluetooth')
+    """
+    Start the service, and make sure the adapter came up powered.
+
+    bluetoothd powers the adapter at start when AutoEnable is set,
+    which is the default -- but not every install keeps the default,
+    and an adapter that is running but unpowered looks exactly like
+    one with nothing nearby.
+    """
+    await services.start(SERVICE)
+
+    adapter = await default_adapter()
+    if not adapter.powered:
+        await _adapter(adapter.path).powered.set_async(True)
+
     return await status()
 
 
 async def service_stop() -> AdapterState:
-    await services.stop('bluetooth')
-    return AdapterState(path='', service_active=False)
+    await services.stop(SERVICE)
+    return await status()
+
+
+# --- Devices -----------------------------------------------------------------
+
+async def devices() -> list[bluez.Device]:
+    """Every device BlueZ knows about: paired, and anything found nearby."""
+    return await bluez.inventory()
+
+
+async def find(address: str) -> bluez.Device:
+    """
+    A device by its address.
+
+    Case-insensitive, since addresses are copied around by hand and
+    BlueZ reports them in upper case while plenty of tools print lower.
+    """
+    wanted = address.strip().upper()
+    known = await devices()
+
+    for device in known:
+        if device.address.upper() == wanted:
+            return device
+
+    raise NotFoundError('device', address, [d.address for d in known])
+
+
+async def pair(address: str) -> bluez.Device:
+    """
+    Pair with a device and trust it.
+
+    Long-running: it waits while someone confirms the code on both
+    screens, which can take most of BlueZ's thirty seconds. Run it as
+    a task.
+    """
+    device = await find(address)
+    proxy = bluez.device_proxy(device.path)
+
+    if not device.paired:
+        try:
+            await proxy.pair()
+        except Exception as exc:
+            raise NotAvailableError(
+                f'pairing with {device.name} failed: {exc}',
+                hint='put the phone in pairing mode, and confirm the code '
+                     'on both screens') from exc
+
+    await trust(address)
+    return await find(address)
+
+
+async def trust(address: str) -> None:
+    """
+    Let a paired device connect without asking.
+
+    Without it a phone reconnecting on ignition stops to have each
+    profile authorised -- the agent allows those, but it is a round
+    trip per profile for nothing.
+    """
+    device = await find(address)
+    if not device.trusted:
+        await bluez.device_proxy(device.path).trusted.set_async(True)
+
+
+async def forget(address: str) -> None:
+    """
+    Unpair and remove.
+
+    RemoveDevice rather than just unpairing: it disconnects, drops the
+    bond, and deletes the record, so the device is as if never seen. A
+    phone that still believes it is paired will need to forget the car
+    on its own side too before they can pair again.
+    """
+    device = await find(address)
+    adapter = await default_adapter()
+    await _adapter(adapter.path).remove_device(device.path)
+
+
+async def connect(address: str) -> bluez.Device:
+    device = await find(address)
+    try:
+        await bluez.device_proxy(device.path).connect()
+    except Exception as exc:
+        raise NotAvailableError(
+            f'cannot connect to {device.name}: {exc}',
+            hint='is it in range, with Bluetooth on?') from exc
+    return await find(address)
+
+
+async def disconnect(address: str) -> bluez.Device:
+    device = await find(address)
+    await bluez.device_proxy(device.path).disconnect()
+    return await find(address)
+
+
+# --- Being found, and finding -----------------------------------------------
+
+async def set_visible(on: bool, seconds: int = 0) -> AdapterState:
+    """
+    Whether other devices can find the car and pair with it.
+
+    Discoverable and pairable go together: one without the other is
+    either a car nobody can see, or one everybody can see and nobody
+    can pair with.
+
+    BlueZ's own timeouts are set to the same window, so the car stops
+    advertising on schedule even if whatever asked for it has died.
+    """
+    adapter = await default_adapter()
+    proxy = _adapter(adapter.path)
+
+    if on:
+        await proxy.discoverable_timeout.set_async(seconds)
+        await proxy.pairable_timeout.set_async(seconds)
+        await proxy.pairable.set_async(True)
+        await proxy.discoverable.set_async(True)
+    else:
+        await proxy.discoverable.set_async(False)
+        await proxy.pairable.set_async(False)
+
+    return await status()
+
+
+async def set_discovery(on: bool) -> AdapterState:
+    """
+    Whether the car is looking for other devices.
+
+    BlueZ ties discovery to the D-Bus client that started it, and
+    stops it when that client goes away. So this only lasts as long as
+    the calling process -- which is why pairing mode runs in the
+    daemon rather than in a command that exits.
+    """
+    adapter = await default_adapter()
+    proxy = _adapter(adapter.path)
+
+    try:
+        if on:
+            await proxy.start_discovery()
+        else:
+            await proxy.stop_discovery()
+    except Exception as exc:
+        # Stopping discovery that is not running raises; that is
+        # already the state asked for.
+        if on:
+            raise NotAvailableError(
+                f'cannot start scanning: {exc}') from exc
+
+    return await status()

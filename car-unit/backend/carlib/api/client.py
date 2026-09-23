@@ -394,9 +394,49 @@ class _Settings:
         return await request('DELETE', f'/settings/{key}')
 
 
+class _Bluetooth:
+    """Mirrors the daemon's Bluetooth routes, for the bt CLI."""
+
+    async def status(self) -> dict:
+        return await request('GET', '/bluetooth')
+
+    async def service(self, active: bool) -> dict:
+        return await request('POST', '/bluetooth/service',
+                             {'active': active})
+
+    async def pairing_mode(self, seconds: int) -> dict:
+        return await request('POST', '/bluetooth/pairing-mode',
+                             {'seconds': seconds})
+
+    async def stop_pairing_mode(self) -> dict:
+        return await request('DELETE', '/bluetooth/pairing-mode')
+
+    async def pending(self) -> dict | None:
+        return await request('GET', '/bluetooth/pairing')
+
+    async def answer(self, accept: bool) -> dict:
+        return await request('POST', '/bluetooth/pairing',
+                             {'accept': accept})
+
+    async def pair(self, address: str) -> dict:
+        return await request('POST', f'/bluetooth/devices/{address}/pair')
+
+    async def connect(self, address: str) -> dict:
+        return await request('POST',
+                             f'/bluetooth/devices/{address}/connect')
+
+    async def disconnect(self, address: str) -> dict:
+        return await request('POST',
+                             f'/bluetooth/devices/{address}/disconnect')
+
+    async def forget(self, address: str) -> dict:
+        return await request('DELETE', f'/bluetooth/devices/{address}')
+
+
 fm = _Fm()
 source = _Source()
 geocoding = _Geocoding()
 places = _Places()
 routing = _Routing()
 settings = _Settings()
+bluetooth = _Bluetooth()

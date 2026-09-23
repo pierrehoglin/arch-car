@@ -25,6 +25,11 @@ IFACE_DEVICE = 'org.bluez.Device1'
 IFACE_BATTERY = 'org.bluez.Battery1'
 IFACE_PLAYER = 'org.bluez.MediaPlayer1'
 IFACE_ADAPTER = 'org.bluez.Adapter1'
+IFACE_AGENT = 'org.bluez.Agent1'
+IFACE_AGENT_MANAGER = 'org.bluez.AgentManager1'
+
+# Where BlueZ keeps the agent manager.
+AGENT_MANAGER_PATH = '/org/bluez'
 
 
 # --- Interfaces ------------------------------------------------------------
@@ -88,8 +93,54 @@ class Device1(DbusInterfaceCommonAsync,
     async def disconnect(self) -> None:
         raise NotImplementedError
 
+    @dbus_method_async()
+    async def pair(self) -> None:
+        """
+        Bond with the device.
+
+        Long-running: returns only once pairing has finished, which
+        includes waiting for someone to confirm the passkey. Call it
+        from a task, never from a request handler that has to answer.
+        """
+        raise NotImplementedError
+
+    @dbus_method_async()
+    async def cancel_pairing(self) -> None:
+        raise NotImplementedError
+
     @dbus_property_async(property_signature='b')
     def connected(self) -> bool:
+        raise NotImplementedError
+
+    @dbus_property_async(property_signature='b')
+    def paired(self) -> bool:
+        raise NotImplementedError
+
+    @dbus_property_async(property_signature='b')
+    def trusted(self) -> bool:
+        """
+        Whether the device may connect without asking.
+
+        Set once paired, so a phone reconnecting on ignition does not
+        stop to have each profile authorised.
+        """
+        raise NotImplementedError
+
+
+class AgentManager1(DbusInterfaceCommonAsync,
+                    interface_name=IFACE_AGENT_MANAGER):
+    """Where an agent is registered, at /org/bluez."""
+
+    @dbus_method_async(input_signature='os')
+    async def register_agent(self, agent: str, capability: str) -> None:
+        raise NotImplementedError
+
+    @dbus_method_async(input_signature='o')
+    async def request_default_agent(self, agent: str) -> None:
+        raise NotImplementedError
+
+    @dbus_method_async(input_signature='o')
+    async def unregister_agent(self, agent: str) -> None:
         raise NotImplementedError
 
 
@@ -283,6 +334,11 @@ async def players() -> list[Player]:
 
 def player_proxy(path: str) -> MediaPlayer1:
     return MediaPlayer1.new_proxy(SERVICE, path, system_bus())
+
+
+def agent_manager() -> AgentManager1:
+    return AgentManager1.new_proxy(SERVICE, AGENT_MANAGER_PATH,
+                                   system_bus())
 
 
 def device_proxy(path: str) -> Device1:

@@ -20,7 +20,7 @@ from carlib.core.errors import (
 from carlib.location import geocoding, places
 from carlib.navigation import routing
 from carlib.radio import fm
-from carlib.system import audio, source
+from carlib.system import audio, bluetooth, source
 
 # Library exceptions to HTTP status. Anything unmapped is a 500, which
 # is correct: an unexpected exception is a bug here, not a client
@@ -278,6 +278,33 @@ async def audio_mute(muted: bool | None = None) -> dict:
 
 async def audio_devices() -> list[dict]:
     return [device.to_dict() for device in await audio.devices()]
+
+
+# --- Bluetooth --------------------------------------------------------------
+#
+# Pairing state lives in the daemon (carlib.bluetooth.pairing), so the
+# routes that need it are given it by main.py rather than importing a
+# module-level instance -- the CLI imports this module too, and must
+# not start an agent by doing so.
+
+async def bluetooth_service(active: bool) -> dict:
+    """On and off is the service, not the radio."""
+    state = await (bluetooth.service_start() if active
+                   else bluetooth.service_stop())
+    return state.to_dict()
+
+
+async def bluetooth_forget(address: str) -> dict:
+    await bluetooth.forget(address)
+    return {'forgotten': address.upper()}
+
+
+async def bluetooth_connect(address: str) -> dict:
+    return (await bluetooth.connect(address)).to_dict()
+
+
+async def bluetooth_disconnect(address: str) -> dict:
+    return (await bluetooth.disconnect(address)).to_dict()
 
 
 # --- Settings ---------------------------------------------------------------
