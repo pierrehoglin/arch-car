@@ -29,6 +29,10 @@ QUEUE_LIMIT = 64
 # is a screen quietly going stale.
 HEARTBEAT = 15.0
 
+# Put on every queue when the daemon is stopping. A client blocked on
+# get() will not notice a flag, so it has to be woken with something.
+SHUTDOWN = object()
+
 
 class Events:
     """
@@ -53,6 +57,25 @@ class Events:
                 queue.put_nowait((event, data))
             except asyncio.QueueFull:
                 log.debug('event client is behind; dropping %s', event)
+
+    def shutdown(self) -> None:
+        """
+        End every open stream.
+
+        An SSE response never finishes on its own, so uvicorn's
+        graceful shutdown waits for one for as long as it is held --
+        which is until systemd loses patience and kills the daemon.
+        Ending them here turns a ninety-second stop into an immediate
+        one, and the client sees a clean close and reconnects.
+
+        Queues are drained first: a client that is already behind
+        would otherwise have no room for the sentinel, and would be
+        the one client that never got told.
+        """
+        for queue in list(self._clients):
+            while not queue.empty():
+                queue.get_nowait()
+            queue.put_nowait((SHUTDOWN, None))
 
     def subscribe(self) -> asyncio.Queue:
         queue: asyncio.Queue = asyncio.Queue(maxsize=QUEUE_LIMIT)
@@ -96,6 +119,9 @@ async def stream() -> AsyncIterator[str]:
             except asyncio.TimeoutError:
                 yield ': keep-alive\n\n'
                 continue
+
+            if event is SHUTDOWN:
+                return
 
             yield frame(event, data)
     finally:

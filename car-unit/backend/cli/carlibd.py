@@ -18,10 +18,20 @@ passengers should not be able to change stations.
 
 import os
 import sys
+import signal
 import asyncio
+import contextlib
 import logging
 import argparse
 from pathlib import Path
+
+# How long to wait for open connections before dropping them.
+#
+# The lifespan hook ends the event streams, which is what actually
+# lets a stop finish; this is the backstop for anything else that
+# holds a connection open. Without it uvicorn waits indefinitely and
+# systemd kills the daemon ninety seconds later.
+GRACE = 5
 
 DEFAULT_PORT = 8099
 
@@ -51,11 +61,13 @@ async def serve_both(sock: Path, host: str, port: int,
     import uvicorn
 
     socket_server = uvicorn.Server(uvicorn.Config(
-        'carlib.api.main:app', uds=str(sock), log_level=log_level))
+        'carlib.api.main:app', uds=str(sock), log_level=log_level,
+        timeout_graceful_shutdown=GRACE))
 
     tcp_server = uvicorn.Server(uvicorn.Config(
         'carlib.api.main:app', host=host, port=port,
-        log_level=log_level, lifespan='off'))
+        log_level=log_level, lifespan='off',
+        timeout_graceful_shutdown=GRACE))
 
     socket_task = asyncio.create_task(socket_server.serve())
 
@@ -63,12 +75,47 @@ async def serve_both(sock: Path, host: str, port: int,
     # both together leaves a window where a TCP request could arrive
     # before the lifespan hook has taken state into memory, and that
     # request would read the files instead.
-    for _ in range(100):
-        if socket_server.started:
-            break
-        await asyncio.sleep(0.05)
+    await _started(socket_server)
 
-    await asyncio.gather(socket_task, tcp_server.serve())
+    tcp_task = asyncio.create_task(tcp_server.serve())
+    await _started(tcp_server)
+
+    # Our own signal handling, installed last so it wins.
+    #
+    # Each uvicorn Server installs handlers of its own when it starts
+    # serving, and signal.signal replaces rather than chains -- so the
+    # second to start is the only one that hears ctrl-c. The first
+    # then never sets should_exit, never runs its lifespan shutdown,
+    # and waits for ever while the other one exits.
+    #
+    # The socket server is the one holding the lifespan, so it is
+    # also the one whose shutdown ends the event streams. Losing its
+    # signal is what makes a stop hang.
+    loop = asyncio.get_running_loop()
+
+    def stop() -> None:
+        socket_server.should_exit = True
+        tcp_server.should_exit = True
+
+    for signum in (signal.SIGINT, signal.SIGTERM):
+        with contextlib.suppress(NotImplementedError):
+            loop.add_signal_handler(signum, stop)
+
+    await asyncio.gather(socket_task, tcp_task)
+
+
+async def _started(server, timeout: float = 5.0) -> None:
+    """
+    Wait for a uvicorn Server to finish binding.
+
+    Starting the next one before this has finished leaves a window
+    where a request could arrive before the lifespan hook has taken
+    state into memory, and that request would read the files instead.
+    """
+    for _ in range(int(timeout / 0.05)):
+        if server.started:
+            return
+        await asyncio.sleep(0.05)
 
 
 def main() -> int:
@@ -115,7 +162,8 @@ def main() -> int:
 
     if not args.tcp:
         uvicorn.run('carlib.api.main:app', uds=str(sock),
-                    log_level=args.log_level)
+                    log_level=args.log_level,
+                    timeout_graceful_shutdown=GRACE)
         return 0
 
     # Both listeners. uvicorn binds one address per Server, so serving

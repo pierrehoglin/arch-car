@@ -169,6 +169,7 @@ async def lifespan(app: FastAPI):
 
     global _supervisor, _autostart_task, _geocoder, _audio_watch
     global _bluetooth_watch
+
     _supervisor = asyncio.create_task(_run_supervisor())
     _autostart_task = asyncio.create_task(_autostart())
     _geocoder = asyncio.create_task(_run_geocoder())
@@ -176,6 +177,12 @@ async def lifespan(app: FastAPI):
     _bluetooth_watch = asyncio.create_task(pairing.run())
 
     yield
+
+    # Before the tasks. An open event stream never finishes on its
+    # own, so uvicorn waits for it through the whole graceful
+    # shutdown -- ending them first is what turns a stop that hangs
+    # until systemd kills it into an immediate one.
+    events.events.shutdown()
 
     for task in (_autostart_task, _geocoder, _audio_watch,
                  _bluetooth_watch, _supervisor):
