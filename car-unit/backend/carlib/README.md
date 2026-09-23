@@ -1,5 +1,6 @@
 # btlib
 
+
 Bluetooth integration for the car unit. Library plus thin CLI tools.
 
 The library is written for a future HTTP API: **nothing prints, nothing
