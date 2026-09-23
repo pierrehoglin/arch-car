@@ -182,6 +182,10 @@ async def _watch_media() -> None:
     extrapolates instead, from the last reading and the status.
     """
     last: dict[str, tuple] = {}
+    # Kept apart from the signature rather than read out of it by
+    # index: the signature is a comparison key, and reordering its
+    # fields should not quietly change what this means.
+    was_playing: dict[str, bool] = {}
 
     while True:
         try:
@@ -197,9 +201,23 @@ async def _watch_media() -> None:
                 # watcher then declined to publish.
                 signature = source.signature(playing)
 
-                if last.get(which) != signature:
-                    last[which] = signature
-                    events.events.publish('media', playing.to_dict())
+                if last.get(which) == signature:
+                    continue
+
+                playing_now = playing.status == 'playing'
+                started = playing_now and not was_playing.get(which, False)
+
+                last[which] = signature
+                was_playing[which] = playing_now
+                events.events.publish('media', playing.to_dict())
+
+                # One source at a time. source.supervise() already
+                # does this for FM and MPRIS, but a phone over AVRCP
+                # is not an MPRIS player and is invisible to it -- so
+                # without this, starting Spotify leaves the phone
+                # playing and the two mix.
+                if started:
+                    await _pause_others(which, last, was_playing)
 
         except asyncio.CancelledError:
             raise
@@ -207,6 +225,33 @@ async def _watch_media() -> None:
             log.exception('media watch failed')
 
         await asyncio.sleep(MEDIA_POLL)
+
+
+async def _pause_others(winner: str, last: dict,
+                        was_playing: dict) -> None:
+    """
+    Pause every other source.
+
+    The newcomer wins, which is what a car radio does when you pick
+    it from your phone -- and what supervise() does for the sources
+    it can see.
+    """
+    for which in (source.BLUETOOTH, source.SPOTIFY):
+        if which == winner:
+            continue
+
+        try:
+            other = await source.now_playing(which)
+            if other.status != 'playing':
+                continue
+
+            log.info('media: pausing %s for %s', which, winner)
+            paused = await source.command(which, 'pause')
+            last[which] = source.signature(paused)
+            was_playing[which] = paused.status == 'playing'
+            events.events.publish('media', paused.to_dict())
+        except CarError as exc:
+            log.warning('media: cannot pause %s: %s', which, exc)
 
 
 @contextlib.asynccontextmanager

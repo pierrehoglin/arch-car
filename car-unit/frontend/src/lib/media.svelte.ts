@@ -107,7 +107,29 @@ function report(cause: unknown): void {
       : String(cause)
 }
 
+/* The source that most recently started playing, and a counter that
+   changes with it.
+   
+   A counter rather than just the name, because starting the same
+   source twice is two events and a screen watching only the name
+   would see no change the second time. */
+export const started = $state<{ source: string; at: number }>({
+  source: '',
+  at: 0,
+})
+
 function apply(playing: NowPlaying): void {
+  const was = media.players[playing.source]
+
+  /* A transition into playing, not the fact of playing. Following
+     the state would drag the screen back every time the reading
+     arrived, so choosing a different source by hand would be
+     impossible while anything was playing. */
+  if (playing.status === 'playing' && was?.status !== 'playing') {
+    started.source = playing.source
+    started.at = Date.now()
+  }
+
   media.players = { ...media.players, [playing.source]: playing }
   media.read = { ...media.read, [playing.source]: Date.now() }
 }
@@ -155,12 +177,20 @@ export const toggle = (source: string) =>
  * Subscribes only -- the connection belongs to the root layout. The
  * clock runs while anything is mounted and stops when nothing is,
  * so a parked car is not ticking for no one.
+ *
+ * Reference counted: the media layout watches so that a source
+ * starting is noticed wherever you are, and the screen showing a
+ * source watches too. The first to arrive starts the clock and the
+ * last to leave stops it.
  */
+let watchers = 0
+
 export function watch(): () => void {
   const off = on('media', (data) => {
     apply(data as NowPlaying)
   })
 
+  watchers += 1
   if (!ticking) {
     ticking = setInterval(() => {
       clock.tick += 1
@@ -169,7 +199,10 @@ export function watch(): () => void {
 
   return () => {
     off()
-    clearInterval(ticking)
-    ticking = undefined
+    watchers -= 1
+    if (watchers === 0) {
+      clearInterval(ticking)
+      ticking = undefined
+    }
   }
 }

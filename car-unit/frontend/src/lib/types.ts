@@ -47,10 +47,26 @@ export const DEV_SECTIONS: Section[] = [
 /** Media sources, each its own route. FM and USB have controls that
  *  have nothing to do with a phone player -- a frequency dial against
  *  a track list -- so they are pages, not a switch inside one. */
-export const MEDIA_SOURCES: Section[] = [
-  { href: '/media/bluetooth', label: 'Bluetooth' },
-  { href: '/media/spotify', label: 'Spotify' },
+/** A media source, and what the daemon calls it.
+ *
+ * `id` is the name in /api/media/{id}, so a source that starts
+ * playing can be matched to the screen that shows it. FM has none:
+ * it is the car's own radio, not a player the daemon polls.
+ */
+export interface MediaSource extends Section {
+  id?: string
+}
+
+/* FM first: it is the one that always works, needs no phone, and is
+   where the car lands when nothing else is playing.
+   
+   Spotify before Bluetooth so that when both report playing -- which
+   they do when the phone is part of the same Connect session -- the
+   more specific one wins. */
+export const MEDIA_SOURCES: MediaSource[] = [
   { href: '/media/fm', label: 'FM' },
+  { href: '/media/spotify', label: 'Spotify', id: 'spotify' },
+  { href: '/media/bluetooth', label: 'Bluetooth', id: 'bluetooth' },
 ]
 
 /** The four ambient colours. Stored as the canonical swatch hex;

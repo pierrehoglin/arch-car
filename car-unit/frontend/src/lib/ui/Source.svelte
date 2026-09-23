@@ -23,8 +23,9 @@
   interface Props {
     /** bluetooth, spotify, or an MPRIS player name. */
     source: string
-    /** Two colours standing in for artwork where there is none. */
-    tint: [string, string]
+    /** Two colours standing in for artwork where there is none.
+     *  Omitted for a source that never has any. */
+    tint?: [string, string]
     /** Shown when nothing is playing. */
     empty: string
     /** And what to do about it. */

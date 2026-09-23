@@ -557,6 +557,8 @@ const playing: Record<string, Playing> = {
     index: 0, position: 34496, since: Date.now(), present: true,
   },
   spotify: {
+    // 'spotifyd' on the unit, 'spotify' on a desktop -- the
+    // daemon reports whichever it found.
     source: 'spotify', device: 'spotifyd', status: 'paused',
     index: 1, position: 61000, since: Date.now(), present: true,
   },
@@ -620,6 +622,17 @@ export function mediaCommand(source: string, action: string) {
     state.position = here
     state.since = Date.now()
     state.status = 'playing'
+
+    /* One source at a time, as the daemon enforces. Without this the
+       mock is the one place where two can play at once, which is
+       exactly the case the screens are being built to handle. */
+    for (const [name, other] of Object.entries(playing)) {
+      if (name === source || other.status !== 'playing') continue
+      other.position = at(other)
+      other.since = Date.now()
+      other.status = 'paused'
+      emit('media', nowPlaying(name))
+    }
   } else if (action === 'pause' || action === 'stop') {
     state.position = action === 'stop' ? 0 : here
     state.since = Date.now()

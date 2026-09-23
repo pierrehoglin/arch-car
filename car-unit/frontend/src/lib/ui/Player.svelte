@@ -21,7 +21,10 @@
      *  not expose it. */
     art?: string
     /** Two colours standing in for artwork when there is none, so
-     *  each source is recognisable at a glance without a logo. */
+     *  each source is recognisable at a glance without a logo.
+     *  Omitted for a source that never has any -- a coloured square
+     *  where a cover would be is a placeholder for something that is
+     *  never coming. */
     tint?: [string, string]
     /** Often empty: a queue needs AVRCP browsing over Bluetooth,
      *  which Android supports and iOS does not. */
@@ -42,7 +45,7 @@
     position = 0,
     playing = false,
     art = '',
-    tint = ['#e0b45a', '#b06fd0'],
+    tint,
     queue = [],
     onplay,
     onseek,
@@ -58,22 +61,23 @@
   const elapsed = $derived(length > 0 ? (position / length) * 100 : 0)
 </script>
 
-<!-- The cover where there is one, a gradient where there is not.
-     Bluetooth never sends artwork, and a source with no picture
-     should still look like something rather than a hole.
+<!-- The cover, a stand-in, or nothing at all.
+     
+     Nothing when a source has neither: AVRCP does not carry artwork
+     -- the profile can, but BlueZ does not expose it -- so a square
+     of colour there would be waiting for a picture that never
+     arrives. Better to let the track sit on its own.
 
      The image is allowed to fail quietly: it comes from the
      provider's CDN, and a car without signal is the normal case, not
      an error worth showing. -->
-<div
-  class="art"
-  style:--from={tint[0]}
-  style:--to={tint[1]}
->
-  {#if art}
+{#if art}
+  <div class="art">
     <img src={art} alt="" onerror={(e) => (e.currentTarget.hidden = true)} />
-  {/if}
-</div>
+  </div>
+{:else if tint}
+  <div class="art" style:--from={tint[0]} style:--to={tint[1]}></div>
+{/if}
 
 <div class="titles">
   <h2>{title}</h2>
