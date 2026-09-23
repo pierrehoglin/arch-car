@@ -1,6 +1,7 @@
 <script lang="ts">
   import Icon from './Icon.svelte'
   import { status } from './status.svelte'
+  import { bluetooth, connected } from './bluetooth.svelte'
 
   interface Props {
     title: string
@@ -23,6 +24,17 @@
   let now = $state(new Date())
   const outside = $derived(status.outside)
   const bars = $derived(status.bars)
+
+  /* What the badge has to say.
+   *
+   * Off is not the same as nothing connected. With the service
+   * stopped there is no radio to connect anything to, so the badge
+   * goes rather than sitting there implying the car is looking.
+   *
+   * The root layout follows Bluetooth for the whole session, so this
+   * is already current wherever you are. */
+  const radio = $derived(bluetooth.state.adapter.service_active)
+  const phone = $derived(connected())
 
   /* The speaker shows roughly how loud it is, so the icon means
      something at a glance rather than only saying "audio". Muted
@@ -101,19 +113,21 @@
       <span class="temp">{outside}°</span>
     {/if}
 
-    <a
-      class="bluetooth"
-      class:connected={status.bluetooth}
-      href="/settings/connectivity"
-      aria-label={status.bluetooth
-        ? 'Bluetooth connected'
-        : 'Bluetooth, nothing connected'}
-    >
-      <Icon
-        name={status.bluetooth ? 'bluetooth-connected' : 'bluetooth'}
-        size={22}
-      />
-    </a>
+    {#if radio}
+      <a
+        class="bluetooth"
+        class:connected={!!phone}
+        href="/settings/connectivity"
+        aria-label={phone
+          ? `Bluetooth, ${phone.name} connected`
+          : 'Bluetooth, nothing connected'}
+      >
+        <Icon
+          name={phone ? 'bluetooth-connected' : 'bluetooth'}
+          size={22}
+        />
+      </a>
+    {/if}
 
     <!-- Drawn rather than an icon, so the number of lit bars is data. -->
     <span class="signal" aria-label="{bars} of 4 bars">
@@ -277,12 +291,12 @@
        the edges of its own 24px box -- roughly 3px of air each side --
        so matching their 10px would read as 13. */
     padding: 9px 7px;
-    color: var(--text-dim);
+    /* One colour either way. The icon itself changes when something
+       is connected, and colouring it as well would say the same
+       thing twice -- while spending the accent, which the status bar
+       otherwise reserves for the thing being acted on. */
+    color: var(--text);
     border-radius: var(--radius-sm);
-  }
-
-  .bluetooth.connected {
-    color: var(--accent);
   }
 
   .bluetooth:focus-visible {

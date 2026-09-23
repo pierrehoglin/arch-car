@@ -6,8 +6,6 @@
  */
 
 interface Status {
-  /** Whether any Bluetooth device is connected. */
-  bluetooth: boolean
   /** Cellular signal, 0 to 4. */
   bars: number
   /**
@@ -22,7 +20,6 @@ interface Status {
 }
 
 export const status = $state<Status>({
-  bluetooth: false,
   bars: 4,
   outside: 19,
 })
