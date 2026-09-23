@@ -330,6 +330,11 @@ CATALOGUE: tuple[Known, ...] = (
           'external services. Some weather providers block requests '
           'they cannot attribute.'),
 
+    Known('web.root', '', 'Directory of the built frontend. Empty '
+          'means the daemon serves the API only, which is what the '
+          'Vite dev server expects. Set it to the SvelteKit build '
+          'directory to serve the screens from the daemon itself.'),
+
     Known('fm.autostart', False, 'Start the radio when the daemon '
           'starts.', 'bool'),
     Known('fm.gain', 40.0, 'Tuner gain in dB. A bare wire wants ~40; '

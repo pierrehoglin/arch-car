@@ -23,13 +23,15 @@ and passengers should not be able to change stations.
 import asyncio
 import logging
 import contextlib
+from pathlib import Path
 
-from fastapi import APIRouter, FastAPI, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi import APIRouter, FastAPI, Request, Response
+from fastapi.responses import (FileResponse, JSONResponse,
+                               StreamingResponse)
 from pydantic import BaseModel
 
 from carlib.core import settings, state
-from carlib.core.errors import CarError
+from carlib.core.errors import CarError, NotFoundError
 from carlib.api import events, routes
 from carlib.bluetooth.pairing import Pairing
 from carlib.location import geocoding
@@ -695,3 +697,54 @@ async def get_navigate_status() -> dict:
 
 # Registered last, so every route above is on the router by now.
 app.include_router(api)
+
+
+# --- The screens ------------------------------------------------------------
+#
+# Registered after the router, so /api always wins: FastAPI tries
+# routes in the order they were added, and the catch-all below would
+# otherwise swallow every endpoint.
+
+
+def _web_root() -> Path | None:
+    """Where the built frontend is, if it is being served at all."""
+    configured = settings.get('web.root', '')
+    if not configured:
+        return None
+
+    root = Path(configured).expanduser()
+    return root if root.is_dir() else None
+
+
+@app.get('/{path:path}', include_in_schema=False)
+async def screens(path: str) -> Response:
+    """
+    Serve the built frontend.
+
+    Anything that is not a real file falls back to index.html, because
+    the routes live in the browser: asking the daemon for
+    /settings/sound directly has to return the app, which then reads
+    the URL and shows that screen.
+    """
+    root = _web_root()
+    if root is None:
+        raise NotFoundError(
+            'frontend', path,
+            ['set web.root to the build directory, or use the dev '
+             'server'])
+
+    target = (root / path).resolve()
+
+    # A path that climbs out of the root is not a typo; refuse rather
+    # than explain.
+    if root.resolve() not in target.parents and target != root.resolve():
+        raise NotFoundError('file', path, [])
+
+    if target.is_file():
+        return FileResponse(target)
+
+    index = root / 'index.html'
+    if index.is_file():
+        return FileResponse(index)
+
+    raise NotFoundError('index.html', str(root), [])
