@@ -709,6 +709,46 @@ class NowPlaying:
 SETTLE_TIMEOUT = 1.2
 SETTLE_INTERVAL = 0.08
 
+# One command produces more than one notification, and they do not
+# arrive together. Pausing sends the status first and the final
+# position after it, so a reading taken the moment the status changes
+# carries the position from before the command.
+#
+# This is how long to keep reading after the status has settled,
+# waiting for the position to follow. Short, because it is the gap
+# between two notifications about the same event, not a round trip.
+POSITION_GRACE = 0.6
+
+
+def _plain(text: str) -> str:
+    """Case and spacing removed, for comparing two spellings."""
+    return ' '.join(text.split()).casefold()
+
+
+def same_track(a: 'NowPlaying', b: 'NowPlaying') -> bool:
+    """
+    Whether two sources are playing the same thing.
+
+    Which happens for real, and often: a phone playing Spotify over
+    Bluetooth is one Connect session surfacing twice. AVRCP reports
+    it because the phone's media session is Spotify, and the Connect
+    device reports it because it is the same session.
+
+    The title alone decides it. Artist and album are not comparable
+    across the two: playerctl joins several artists into one string
+    while AVRCP sends a single name, and albums are abbreviated
+    differently -- so requiring those to match means never matching.
+
+    Two sources playing the same title at the same moment is the same
+    audio. The alternative -- two devices independently starting the
+    same song within seconds of each other -- is not something worth
+    designing for.
+    """
+    if not a.title or not b.title:
+        return False
+
+    return _plain(a.title) == _plain(b.title)
+
 
 def signature(playing: 'NowPlaying') -> tuple:
     """
@@ -831,27 +871,66 @@ async def command(source: str, action: str) -> NowPlaying:
         verb = {'prev': 'previous'}.get(action, action)
         await _run(PLAYERCTL, '-p', player.name, verb)
 
-    return await _settled(source, signature(before))
+    return await _settled(source, before)
 
 
-async def _settled(source: str, was: tuple) -> NowPlaying:
+async def _settled(source: str, before: NowPlaying) -> NowPlaying:
     """
-    Read until the player has actually changed, or time runs out.
+    Read until the player has finished responding, or time runs out.
 
-    Without this the answer describes the state before the command,
-    and a screen that applies it puts the old track back over the
-    right one -- which then arrives again on the stream a moment
-    later, so the display flickers backwards and forwards.
+    Two waits, because one command produces two notifications.
 
-    Giving up and returning the last reading is correct for the
-    commands that change nothing: pressing pause twice, or next at
-    the end of a queue the phone will not advance past.
+    First for the state: without it the answer describes the player
+    before the command, and a screen that applies it puts the old
+    track back over the right one -- which then arrives again on the
+    stream a moment later, so the display flickers.
+
+    Then for the position, which follows separately. AVRCP sends the
+    playback status and the position as different events, and BlueZ
+    reports whichever it has; read too early and the position is the
+    one from before the command, so a pause appears to move the track
+    backwards.
+
+    Giving up is correct in both cases. A command that changes
+    nothing -- pause when already paused, next at the end of a queue
+    the phone will not advance past -- has no second notification to
+    wait for, and the reading in hand is the answer.
     """
+    was = signature(before)
+
     deadline = time.monotonic() + SETTLE_TIMEOUT
     playing = await now_playing(source)
 
     while signature(playing) == was and time.monotonic() < deadline:
         await asyncio.sleep(SETTLE_INTERVAL)
         playing = await now_playing(source)
+
+    if signature(playing) == was:
+        # Nothing changed, so there is no position to wait for.
+        return playing
+
+    return await _positioned(source, playing, before.position)
+
+
+async def _positioned(source: str, playing: NowPlaying,
+                      was: int | None) -> NowPlaying:
+    """
+    Wait for the position to be reported for the new state.
+
+    Only where it can be stale. A track change resets the position to
+    zero and BlueZ knows that immediately; it is stopping and starting
+    within one track where the cached value lags.
+    """
+    if playing.position is None or playing.position != was:
+        return playing
+
+    deadline = time.monotonic() + POSITION_GRACE
+
+    while time.monotonic() < deadline:
+        await asyncio.sleep(SETTLE_INTERVAL)
+        fresh = await now_playing(source)
+
+        if fresh.position != was:
+            return fresh
 
     return playing

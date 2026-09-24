@@ -33,6 +33,7 @@ const KNOWN = [
   'source',
   'bluetooth',
   'pairing',
+  'media',
 ] as const
 
 const handlers = new Map<string, Set<Handler>>()
@@ -47,6 +48,13 @@ const handlers = new Map<string, Set<Handler>>()
 const latest = new Map<string, unknown>()
 
 let source: EventSource | undefined
+
+/* The listeners attached to the current EventSource, so they can be
+   taken off again. Closing the socket makes them unreachable anyway,
+   but leaving them attached to an object we are about to drop means
+   the teardown depends on the garbage collector rather than saying
+   what it does. */
+let attached: Array<[string, (message: MessageEvent) => void]> = []
 
 /** Reported so a screen can say the readings are not live. */
 export const stream = $state<{ connection: Connection }>({
@@ -68,7 +76,25 @@ export function on(event: string, handler: Handler): () => void {
   }
   set.add(handler)
 
-  if (latest.has(event)) handler(latest.get(event))
+  /* The replay is deferred, never called here.
+   *
+   * on() is called from inside $effect -- that is what a store's
+   * watch() is for -- and a handler run synchronously would read
+   * whatever state it touches as a dependency of that effect. Since
+   * these handlers write that same state, the effect would re-run on
+   * its own writes, for ever. A microtask is outside the effect, so
+   * the reads there belong to nobody.
+   *
+   * Checked again on the way out: a screen can mount and unmount
+   * inside one tick, and a handler that has unsubscribed must not
+   * still be called.
+   */
+  if (latest.has(event)) {
+    const held = latest.get(event)
+    queueMicrotask(() => {
+      if (set.has(handler)) handler(held)
+    })
+  }
 
   return () => {
     set.delete(handler)
@@ -101,12 +127,17 @@ export function connect(): void {
 
   /* Listeners for every known name, whether or not anything is
      subscribed yet. That is what fills the cache, and it is why a
-     screen opened later does not have to wait. */
-  for (const event of KNOWN) {
-    source.addEventListener(event, (message: MessageEvent) =>
-      receive(event, message.data),
-    )
-  }
+     screen opened later does not have to wait.
+     
+     An event name missing from KNOWN is received by nobody:
+     EventSource delivers a named event only to a listener registered
+     for that name, and there is no error to notice. */
+  attached = KNOWN.map((event) => {
+    const listener = (message: MessageEvent) =>
+      receive(event, message.data)
+    source?.addEventListener(event, listener)
+    return [event, listener] as [string, typeof listener]
+  })
 
   source.onopen = () => {
     stream.connection = 'open'
@@ -122,8 +153,21 @@ export function connect(): void {
 }
 
 export function disconnect(): void {
+  for (const [event, listener] of attached) {
+    source?.removeEventListener(event, listener)
+  }
+  attached = []
+
   source?.close()
   source = undefined
+
+  /* The cache goes with the connection: what it holds describes a
+     session that has ended, and replaying it to whoever subscribes
+     next would hand them a reading from before the gap.
+     
+     Subscribers are left alone -- they are components, and they
+     unsubscribe when they unmount. Clearing them here would leave a
+     reconnect with nobody listening. */
   latest.clear()
   stream.connection = 'closed'
 }

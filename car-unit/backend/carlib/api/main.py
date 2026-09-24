@@ -217,7 +217,8 @@ async def _watch_media() -> None:
                 # without this, starting Spotify leaves the phone
                 # playing and the two mix.
                 if started:
-                    await _pause_others(which, last, was_playing)
+                    await _pause_others(which, playing, last,
+                                        was_playing)
 
         except asyncio.CancelledError:
             raise
@@ -227,7 +228,7 @@ async def _watch_media() -> None:
         await asyncio.sleep(MEDIA_POLL)
 
 
-async def _pause_others(winner: str, last: dict,
+async def _pause_others(winner: str, started: object, last: dict,
                         was_playing: dict) -> None:
     """
     Pause every other source.
@@ -235,6 +236,13 @@ async def _pause_others(winner: str, last: dict,
     The newcomer wins, which is what a car radio does when you pick
     it from your phone -- and what supervise() does for the sources
     it can see.
+
+    Except where the other source is playing the same track. A phone
+    playing Spotify over Bluetooth is one Connect session arriving
+    twice, not two sources competing: pausing the "other" one pauses
+    the session, which stops the music that had just started. The
+    screen then shows it paused, the next reading finds it playing
+    again, and the display flickers between the two.
     """
     for which in (source.BLUETOOTH, source.SPOTIFY):
         if which == winner:
@@ -245,7 +253,18 @@ async def _pause_others(winner: str, last: dict,
             if other.status != 'playing':
                 continue
 
-            log.info('media: pausing %s for %s', which, winner)
+            if source.same_track(started, other):
+                log.info('media: %s and %s are one session (%r)',
+                         winner, which, started.title)
+                continue
+
+            # Logged, because the decision to pause is the one that
+            # stops someone's music: when it is wrong, the journal
+            # should say what it compared rather than leaving the
+            # titles to be guessed at.
+            log.info('media: pausing %s (%r) for %s (%r)',
+                     which, other.title, winner, started.title)
+
             paused = await source.command(which, 'pause')
             last[which] = source.signature(paused)
             was_playing[which] = paused.status == 'playing'

@@ -40,6 +40,12 @@ export const GROUPS: Group[] = [
     paths: ['/api/fm'],
   },
   {
+    id: 'media',
+    label: 'Media',
+    detail: 'What Bluetooth and Spotify are playing',
+    paths: ['/api/media'],
+  },
+  {
     id: 'weather',
     label: 'Weather',
     detail: 'Current conditions and the forecast',

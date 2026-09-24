@@ -49,14 +49,14 @@
   .settings {
     display: grid;
     grid-template-columns: 208px minmax(0, 1fr);
-    /* auto, not 1fr: the panels are as tall as their cards and the
-       page scrolls past them, rather than each card stretching to
-       fill the screen. */
-    grid-template-rows: auto;
+    /* One row, filling the screen. The scrolling happens inside the
+       panels column, so the row has to be exactly as tall as the
+       screen rather than as tall as its contents. */
+    grid-template-rows: minmax(0, 1fr);
     gap: var(--spacing-l);
     height: 100%;
     padding: var(--spacing-l);
-    overflow-y: auto;
+    overflow: hidden;
   }
 
   /* align-self is how the card sits in the grid, not how it lays out
@@ -115,10 +115,21 @@
     color: var(--text);
   }
 
+  /* The only thing that scrolls. The sections stay put: a nav that
+     slid away as you read a long panel would mean scrolling back up
+     to change section.
+     
+     Padding on the right so a scrollbar sits beside the cards rather
+     than over them, and a matching negative margin so the cards keep
+     their place when there is none. */
   .panels {
     display: flex;
     flex-direction: column;
     gap: var(--spacing-l);
     align-content: start;
+    min-height: 0;
+    overflow-y: auto;
+    padding-right: var(--spacing-s);
+    margin-right: calc(var(--spacing-s) * -1);
   }
 </style>

@@ -260,6 +260,18 @@ export const handlers = [
     return HttpResponse.json({ forgotten: String(params.address) })
   }),
 
+  http.get('/api/media/:source', async ({ params }) => {
+    await wait(NORMAL_MS)
+    return HttpResponse.json(device.mediaNow(String(params.source)))
+  }),
+
+  http.post('/api/media/:source/:action', async ({ params }) => {
+    await wait(NORMAL_MS)
+    return HttpResponse.json(
+      device.mediaCommand(String(params.source), String(params.action)),
+    )
+  }),
+
   http.get('/api/places', async () => {
     await wait(NORMAL_MS)
     return HttpResponse.json(SAVED_PLACES)

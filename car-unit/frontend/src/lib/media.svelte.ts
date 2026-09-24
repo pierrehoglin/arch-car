@@ -68,21 +68,11 @@ export const busyWith = (source: string) => media.busy.includes(source)
  * right only at the moment a reading arrived.
  */
 export function elapsed(source: string): number {
+  /* Reading the tick is what makes this recompute -- without it the
+     value would be right only at the moment a reading arrived. */
   void clock.tick
 
-  const player = playerOf(source)
-  if (player.position === null) return 0
-
-  const since =
-    player.status === 'playing'
-      ? Date.now() - (media.read[source] ?? Date.now())
-      : 0
-
-  const at = player.position + since
-  /* Clamped to the track: a reading that arrives late, or a clock
-     that drifts, would otherwise run the bar past the end and keep
-     going. */
-  return player.duration === null ? at : Math.min(at, player.duration)
+  return at(playerOf(source), media.read[source] ?? Date.now())
 }
 
 /** Of the track, 0 to 1, for a progress bar. */
@@ -105,6 +95,19 @@ function report(cause: unknown): void {
     cause instanceof RequestFailed || cause instanceof Error
       ? cause.message
       : String(cause)
+}
+
+/** How far into the track a reading had got, by now. */
+function at(player: NowPlaying, since: number): number {
+  if (player.position === null) return 0
+
+  const run =
+    player.status === 'playing' ? Date.now() - (since || Date.now()) : 0
+
+  const value = player.position + run
+  return player.duration === null
+    ? value
+    : Math.min(value, player.duration)
 }
 
 /* The source that most recently started playing, and a counter that
@@ -130,6 +133,9 @@ function apply(playing: NowPlaying): void {
     started.at = Date.now()
   }
 
+  /* Taken as given. The daemon waits for the player to report a
+     position for the state it has just moved to, so a reading is not
+     published until it is one the screen can believe. */
   media.players = { ...media.players, [playing.source]: playing }
   media.read = { ...media.read, [playing.source]: Date.now() }
 }

@@ -314,3 +314,29 @@ export interface PairingRequest {
   passkey: string | null
   kind: 'confirm' | 'authorize'
 }
+
+/* What a source is playing.
+ *
+ * One shape for both transports: AVRCP and MPRIS carry the same
+ * things under different names. AVRCP has no artwork -- the profile
+ * can carry it, but BlueZ does not expose it -- and neither has a
+ * queue.
+ */
+export interface NowPlaying {
+  source: string
+  /** The phone's name over Bluetooth, the player's over MPRIS. */
+  device: string
+  status: 'playing' | 'paused' | 'stopped' | ''
+  title: string
+  artist: string
+  album: string
+  /** Milliseconds, both. */
+  duration: number | null
+  position: number | null
+  /** A URL on the provider's CDN, or empty. */
+  art: string
+  track_id: string
+  /** Whether there is a player at all. A phone that has not started
+   *  anything is the ordinary state, not an error. */
+  present: boolean
+}
