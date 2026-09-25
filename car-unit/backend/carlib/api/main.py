@@ -20,6 +20,7 @@ Bind to 127.0.0.1 and not 0.0.0.0: the hotspot runs on this machine,
 and passengers should not be able to change stations.
 """
 
+import time
 import asyncio
 import logging
 import contextlib
@@ -51,6 +52,18 @@ _media_watch: asyncio.Task | None = None
 # change on the phone reaches the screen before the song does,
 # rarely enough to be free -- each pass is two subprocess calls.
 MEDIA_POLL = 2.0
+
+# How far a position may differ from where it should have got to
+# before it counts as a seek rather than the track playing on.
+#
+# signature() leaves position out, because it moves every second by
+# definition and comparing it would publish constantly. But a seek is
+# a real change the screen has to hear about, and the way to tell the
+# two apart is that playing on is predictable and a seek is not.
+#
+# Generous, because a pass can be late: a command settling, or the
+# daemon busy elsewhere, both stretch the interval.
+SEEK_TOLERANCE = 4.0
 
 # The daemon's one pairing session: the agent, the window, and
 # whatever is waiting on an answer. Created here, and only here,
@@ -186,6 +199,9 @@ async def _watch_media() -> None:
     # index: the signature is a comparison key, and reordering its
     # fields should not quietly change what this means.
     was_playing: dict[str, bool] = {}
+    # Position, and when it was read, for telling a seek from the
+    # track simply playing on.
+    seen: dict[str, tuple[int, float]] = {}
 
     while True:
         try:
@@ -201,7 +217,9 @@ async def _watch_media() -> None:
                 # watcher then declined to publish.
                 signature = source.signature(playing)
 
-                if last.get(which) == signature:
+                moved = _seeked(which, playing, seen, was_playing)
+
+                if last.get(which) == signature and not moved:
                     continue
 
                 playing_now = playing.status == 'playing'
@@ -226,6 +244,33 @@ async def _watch_media() -> None:
             log.exception('media watch failed')
 
         await asyncio.sleep(MEDIA_POLL)
+
+
+def _seeked(which: str, playing: object, seen: dict,
+            was_playing: dict) -> bool:
+    """
+    Whether the position moved further than playing explains.
+
+    Somebody dragging the bar, or `playerctl position`, changes
+    nothing else about the player -- same track, same status -- so
+    without this the screen keeps showing where the track was before
+    the jump until it happens to change some other way.
+    """
+    position = getattr(playing, 'position', None)
+    now = time.monotonic()
+
+    before = seen.get(which)
+    seen[which] = (position, now) if position is not None else (0, now)
+
+    if position is None or before is None:
+        return False
+
+    was, at = before
+    # Where it should have reached: forward at real time while
+    # playing, standing still otherwise.
+    expected = was + (now - at) * 1000 if was_playing.get(which) else was
+
+    return abs(position - expected) > SEEK_TOLERANCE * 1000
 
 
 async def _pause_others(winner: str, started: object, last: dict,

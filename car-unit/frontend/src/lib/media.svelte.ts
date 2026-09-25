@@ -149,8 +149,14 @@ function apply(playing: NowPlaying): void {
   /* A transition into playing, not the fact of playing. Following
      the state would drag the screen back every time the reading
      arrived, so choosing a different source by hand would be
-     impossible while anything was playing. */
-  if (playing.status === 'playing' && was?.status !== 'playing') {
+     impossible while anything was playing.
+     
+     `was` has to exist. Without that check the first reading of a
+     source counts as a start -- so opening the media page while
+     something is already playing fires one, and it then argues with
+     whatever the page's own redirect had chosen. Arriving somewhere
+     is not the same as something starting. */
+  if (was && playing.status === 'playing' && was.status !== 'playing') {
     started.source = playing.source
     started.at = Date.now()
   }

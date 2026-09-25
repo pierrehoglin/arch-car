@@ -19,6 +19,14 @@
      starting is noticed while you are looking at another one. */
   $effect(() => watch())
 
+  /* Whatever had already started before this mounted.
+   *
+   * The page's own load picks the opening tab, by asking both sources
+   * which is playing. This follows what starts *after* that -- acting
+   * on something from before would be a second answer to a question
+   * already settled, and the two would race. */
+  let seen = started.at
+
   /* Follow whatever starts playing.
    *
    * Only on the moment it starts, never on the fact that it is
@@ -30,9 +38,12 @@
    * would move nothing.
    */
   $effect(() => {
-    void started.at
+    const at = started.at
 
     untrack(() => {
+      if (at === seen) return
+      seen = at
+
       const href = MEDIA_SOURCES.find(
         (source) => source.id === started.source,
       )?.href
