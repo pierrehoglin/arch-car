@@ -47,6 +47,16 @@
      to say about a track. A phone connected with nothing started has
      the first and not the second. */
   const showing = $derived(player.present && !!player.title)
+
+  /* Where the music is coming from, when that is somewhere else.
+   *
+   * A phone over Bluetooth is another device and worth naming. The
+   * Spotify daemon is a process on this machine, and "via spotifyd"
+   * under a tab already labelled Spotify says nothing the screen has
+   * not said. */
+  const elsewhere = $derived(
+    source === 'bluetooth' ? player.device : '',
+  )
 </script>
 
 {#if showing}
@@ -54,7 +64,7 @@
     title={player.title}
     artist={player.artist}
     album={player.album}
-    via={player.device}
+    via={elsewhere}
     art={coverFor(player)}
     {tint}
     length={(player.duration ?? 0) / 1000}

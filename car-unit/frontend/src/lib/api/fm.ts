@@ -54,8 +54,8 @@ export const forgetPreset = (frequency: number) =>
  * sending it as a sequence of moves would leave the daemon holding a
  * half-applied order if one failed.
  *
- * Note that carlib currently sorts presets by frequency when it saves
- * them, so an order set here will not survive until that changes.
+ * Matched by frequency at the daemon: names are not taken on trust,
+ * so a rename that raced with a drag cannot overwrite the stored one.
  */
 export const reorderPresets = (stations: Station[]) =>
   request<Station[]>('/fm/presets/order', {

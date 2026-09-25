@@ -384,22 +384,64 @@ def load_presets() -> list[Station]:
         except (KeyError, TypeError, ValueError):
             continue
 
-    stations.sort(key=lambda s: s.frequency)
     return stations
 
 
 def save_presets(stations: list[Station]) -> None:
+    """
+    Store the list as given.
+
+    Order is the caller's, because it is a choice somebody made: the
+    presets screen lets them be dragged, and sorting here would undo
+    that the moment anything else was saved.
+    """
     _settings.set('presets', [s.to_dict() for s in stations])
 
 
 def add_preset(frequency: float, name: str = '') -> list[Station]:
-    """Add or rename a preset. Frequency is the key."""
-    stations = [s for s in load_presets()
-                if abs(s.frequency - frequency) > 0.01]
+    """
+    Add or rename a preset. Frequency is the key.
+
+    A rename keeps its place; a new one goes on the end. Sorting the
+    list here would move a station somebody had dragged somewhere,
+    for the unrelated reason that a different one was renamed.
+    """
+    stations = load_presets()
+
+    for index, existing in enumerate(stations):
+        if abs(existing.frequency - frequency) <= 0.01:
+            stations[index] = Station(frequency=frequency, name=name)
+            save_presets(stations)
+            return stations
+
     stations.append(Station(frequency=frequency, name=name))
-    stations.sort(key=lambda s: s.frequency)
     save_presets(stations)
     return stations
+
+
+def reorder_presets(frequencies: list[float]) -> list[Station]:
+    """
+    Put the presets in the given order.
+
+    Matched by frequency rather than taking names on trust: the
+    screen sends what it has, and a name that has since changed
+    should not overwrite the stored one. Anything the caller left out
+    keeps its place at the end, so a list that raced with an addition
+    does not silently drop it.
+    """
+    stations = load_presets()
+    by_frequency = {round(s.frequency, 1): s for s in stations}
+
+    ordered = []
+    for wanted in frequencies:
+        station = by_frequency.pop(round(float(wanted), 1), None)
+        if station is not None:
+            ordered.append(station)
+
+    ordered.extend(by_frequency.values())
+
+    save_presets(ordered)
+    return ordered
 
 
 def remove_preset(frequency: float) -> list[Station]:

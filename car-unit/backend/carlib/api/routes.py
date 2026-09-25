@@ -106,6 +106,10 @@ async def fm_add_preset(frequency: float, name: str = '') -> list[dict]:
     return [s.to_dict() for s in fm.add_preset(frequency, name)]
 
 
+async def fm_reorder_presets(frequencies: list[float]) -> list[dict]:
+    return [s.to_dict() for s in fm.reorder_presets(frequencies)]
+
+
 async def fm_remove_preset(frequency: float) -> list[dict]:
     return [s.to_dict() for s in fm.remove_preset(frequency)]
 

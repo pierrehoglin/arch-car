@@ -48,6 +48,7 @@ _audio_watch: asyncio.Task | None = None
 _bluetooth_watch: asyncio.Task | None = None
 _media_watch: asyncio.Task | None = None
 _network_watch: asyncio.Task | None = None
+_fm_watch: asyncio.Task | None = None
 
 # How often to look at what is playing. Often enough that a track
 # change on the phone reaches the screen before the song does,
@@ -58,6 +59,11 @@ MEDIA_POLL = 2.0
 # and the answer changes when somebody drives out of range, not
 # between one second and the next.
 NETWORK_POLL = 5.0
+
+# Reading the radio is a file and a process check, and radiotext
+# scrolls at walking pace -- a second is plenty, and anything faster
+# would be a poll per scroll step for no gain.
+FM_POLL = 1.0
 
 # How far a position may differ from where it should have got to
 # before it counts as a seek rather than the track playing on.
@@ -184,6 +190,43 @@ async def _watch_audio() -> None:
         except Exception:
             log.exception('audio watch failed; retrying in 10s')
             await asyncio.sleep(10)
+
+
+async def _watch_fm() -> None:
+    """
+    Publish the radio's state as it changes.
+
+    RDS is the reason this exists. A station's name arrives a second
+    or two after tuning, and its radiotext changes while you listen --
+    neither is a thing anyone presses a button for, so without a
+    watcher the screen shows whatever was true when it last asked.
+
+    Faster than the network watcher and slower than audio: reading
+    the state is a file and a process check, and radiotext scrolls at
+    walking pace.
+    """
+    # Presets once, at the start. They change only when somebody
+    # edits them, so nothing would otherwise fill the replay cache --
+    # and a screen opening before the first edit would find nothing
+    # waiting for it.
+    with contextlib.suppress(Exception):
+        events.events.publish(
+            'presets', [s.to_dict() for s in fm.load_presets()])
+
+    last: dict | None = None
+
+    while True:
+        try:
+            state = (await fm.status()).to_dict()
+            if state != last:
+                last = state
+                events.events.publish('fm', state)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception('fm watch failed')
+
+        await asyncio.sleep(FM_POLL)
 
 
 async def _watch_network() -> None:
@@ -355,7 +398,7 @@ async def lifespan(app: FastAPI):
     log.info('carlib daemon starting; state held in memory')
 
     global _supervisor, _autostart_task, _geocoder, _audio_watch
-    global _bluetooth_watch, _media_watch, _network_watch
+    global _bluetooth_watch, _media_watch, _network_watch, _fm_watch
 
     _supervisor = asyncio.create_task(_run_supervisor())
     _autostart_task = asyncio.create_task(_autostart())
@@ -364,6 +407,7 @@ async def lifespan(app: FastAPI):
     _bluetooth_watch = asyncio.create_task(pairing.run())
     _media_watch = asyncio.create_task(_watch_media())
     _network_watch = asyncio.create_task(_watch_network())
+    _fm_watch = asyncio.create_task(_watch_fm())
 
     yield
 
@@ -375,7 +419,7 @@ async def lifespan(app: FastAPI):
 
     for task in (_autostart_task, _geocoder, _audio_watch,
                  _bluetooth_watch, _media_watch, _network_watch,
-                 _supervisor):
+                 _fm_watch, _supervisor):
         if task is not None:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -458,6 +502,15 @@ class SettingsBody(BaseModel):
 
 class VolumeBody(BaseModel):
     percent: int
+
+
+class PresetRef(BaseModel):
+    frequency: float
+    name: str = ''
+
+
+class OrderBody(BaseModel):
+    presets: list[PresetRef]
 
 
 class ModeBody(BaseModel):
@@ -582,12 +635,36 @@ async def get_fm_presets() -> list[dict]:
 
 @api.post('/fm/presets')
 async def post_fm_preset(body: PresetBody) -> list[dict]:
-    return await routes.fm_add_preset(body.frequency, body.name)
+    """Add or rename. Published, so every screen sees it -- the one
+    that asked has the answer already."""
+    stations = await routes.fm_add_preset(body.frequency, body.name)
+    events.events.publish('presets', stations)
+    return stations
+
+
+@api.put('/fm/presets/order')
+async def put_preset_order(body: OrderBody) -> list[dict]:
+    """
+    Put the presets in the order given.
+
+    The whole list, not a move: a reorder is one intent, and applying
+    it as a sequence of moves could leave a half-applied order behind
+    if one failed.
+
+    Registered before /fm/presets/{frequency}, or `order` would be
+    read as a frequency.
+    """
+    frequencies = [s.frequency for s in body.presets]
+    stations = await routes.fm_reorder_presets(frequencies)
+    events.events.publish('presets', stations)
+    return stations
 
 
 @api.delete('/fm/presets/{frequency}')
 async def delete_fm_preset(frequency: float) -> list[dict]:
-    return await routes.fm_remove_preset(frequency)
+    stations = await routes.fm_remove_preset(frequency)
+    events.events.publish('presets', stations)
+    return stations
 
 
 @api.get('/fm/devices')

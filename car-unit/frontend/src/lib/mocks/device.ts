@@ -138,9 +138,8 @@ export function savePreset(frequency: number, name: string): Station[] {
   )
 
   /* Order is the user's, so an existing preset keeps its place and a
-     new one goes on the end. Sorting by frequency here -- which
-     carlib currently does -- would throw away a reorder on the next
-     rename. */
+     new one goes on the end. Sorting by frequency here would throw
+     away a reorder on the next rename -- the daemon does the same. */
   if (at === -1) {
     presets = [...presets, { frequency, name }]
   } else {
@@ -154,7 +153,23 @@ export function savePreset(frequency: number, name: string): Station[] {
 }
 
 export function reorderPresets(next: Station[]): Station[] {
-  presets = [...next]
+  /* Matched by frequency, as the daemon does: the names in the
+     request are not taken on trust, so a rename that raced with a
+     drag cannot overwrite the stored one. Anything left out keeps
+     its place at the end. */
+  const held = new Map(presets.map((p) => [p.frequency.toFixed(1), p]))
+  const ordered: Station[] = []
+
+  for (const wanted of next) {
+    const key = wanted.frequency.toFixed(1)
+    const station = held.get(key)
+    if (station) {
+      ordered.push(station)
+      held.delete(key)
+    }
+  }
+
+  presets = [...ordered, ...held.values()]
   emit('presets', presets)
   return presets
 }

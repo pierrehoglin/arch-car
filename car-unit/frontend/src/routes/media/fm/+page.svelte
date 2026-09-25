@@ -14,6 +14,8 @@
     seek,
     toggle,
     tune,
+    loadPresets,
+    refresh,
     watch,
   } from '$lib/radio.svelte'
   import type { Station } from '$lib/api/types'
@@ -31,15 +33,24 @@
      current state on connecting, so there is nothing to fetch first
      -- and RDS arriving a couple of seconds after a tune comes
      through as its own event rather than being waited for. */
-  $effect(() => watch())
+  /* Fetched as well as watched. The stream replays what it has
+     cached, but a screen that opened before the daemon had published
+     anything would sit empty -- and presets are published once, at
+     startup, so "before" is easy to be. */
+  $effect(() => {
+    refresh()
+    loadPresets()
+    return watch()
+  })
 
   const state = $derived(radio.state)
+
+  /* Whether anything is actually coming out. The pipeline running
+     and not muted -- either being false means silence, and the
+     button should offer to start it. */
+  const sounding = $derived(state.playing && !state.paused)
   const frequency = $derived(state.frequency ?? BAND_MIN)
   const rds = $derived(state.rds)
-
-  const position = $derived(
-    ((frequency - BAND_MIN) / (BAND_MAX - BAND_MIN)) * 100,
-  )
 
   const preset = $derived(
     radio.presets.find((p) => Math.abs(p.frequency - frequency) < 0.01),
@@ -100,12 +111,15 @@
     <Icon name="previous" size={22} />
   </button>
 
+  <!-- Three states, not two. `paused` only means anything while the
+       radio is running: stopped, it is false, which read on its own
+       says "playing" about a radio that is off. -->
   <button
     class="round primary"
-    aria-label={state.paused ? 'Play' : 'Pause'}
+    aria-label={sounding ? 'Pause' : 'Play'}
     onclick={toggle}
   >
-    <Icon name={state.paused ? 'play' : 'pause'} size={30} />
+    <Icon name={sounding ? 'pause' : 'play'} size={30} />
   </button>
 
   <button class="round" aria-label="Next station" onclick={() => seek(1)}>
