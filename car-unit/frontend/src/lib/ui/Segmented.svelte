@@ -13,9 +13,19 @@
     /** Omit when the options carry hrefs -- navigation is the change. */
     onchange?: (value: T) => void
     label?: string
+    /** While a change is being applied, so a second cannot be asked
+     *  for before the first has taken. Only affects buttons; an
+     *  option that navigates has nothing to wait for. */
+    disabled?: boolean
   }
 
-  let { options, value, onchange, label = '' }: Props = $props()
+  let {
+    options,
+    value,
+    onchange,
+    label = '',
+    disabled = false,
+  }: Props = $props()
 </script>
 
 <div class="segmented" role="group" aria-label={label}>
@@ -31,6 +41,7 @@
     {:else}
       <button
         class:selected={value === option.value}
+        {disabled}
         onclick={() => onchange?.(option.value)}
         aria-pressed={value === option.value}
       >
@@ -41,6 +52,13 @@
 </div>
 
 <style>
+  button:disabled {
+    /* Dimmed but still readable: which one is selected is the thing
+       you are waiting on, so it has to stay visible. */
+    opacity: 0.6;
+    cursor: default;
+  }
+
   .segmented {
     display: flex;
     padding: 3px;

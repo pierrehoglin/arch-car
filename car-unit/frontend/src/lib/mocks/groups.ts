@@ -46,6 +46,12 @@ export const GROUPS: Group[] = [
     paths: ['/api/media'],
   },
   {
+    id: 'network',
+    label: 'Network',
+    detail: 'Wi-Fi and the hotspot',
+    paths: ['/api/network'],
+  },
+  {
     id: 'weather',
     label: 'Weather',
     detail: 'Current conditions and the forecast',

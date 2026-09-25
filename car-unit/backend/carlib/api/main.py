@@ -47,11 +47,17 @@ _geocoder: asyncio.Task | None = None
 _audio_watch: asyncio.Task | None = None
 _bluetooth_watch: asyncio.Task | None = None
 _media_watch: asyncio.Task | None = None
+_network_watch: asyncio.Task | None = None
 
 # How often to look at what is playing. Often enough that a track
 # change on the phone reaches the screen before the song does,
 # rarely enough to be free -- each pass is two subprocess calls.
 MEDIA_POLL = 2.0
+
+# Slower than the rest. Each pass shells out to nmcli and hostapd_cli,
+# and the answer changes when somebody drives out of range, not
+# between one second and the next.
+NETWORK_POLL = 5.0
 
 # How far a position may differ from where it should have got to
 # before it counts as a seek rather than the track playing on.
@@ -178,6 +184,30 @@ async def _watch_audio() -> None:
         except Exception:
             log.exception('audio watch failed; retrying in 10s')
             await asyncio.sleep(10)
+
+
+async def _watch_network() -> None:
+    """
+    Publish the radio's state when it changes.
+
+    Polled, and slowly. Neither nmcli nor hostapd offers anything to
+    subscribe to, and this is a thing that changes when somebody
+    drives out of range or flips a switch -- not second by second.
+    """
+    last: dict | None = None
+
+    while True:
+        try:
+            state = await routes.network_status()
+            if state != last:
+                last = state
+                events.events.publish('network', state)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception('network watch failed')
+
+        await asyncio.sleep(NETWORK_POLL)
 
 
 async def _watch_media() -> None:
@@ -325,7 +355,7 @@ async def lifespan(app: FastAPI):
     log.info('carlib daemon starting; state held in memory')
 
     global _supervisor, _autostart_task, _geocoder, _audio_watch
-    global _bluetooth_watch, _media_watch
+    global _bluetooth_watch, _media_watch, _network_watch
 
     _supervisor = asyncio.create_task(_run_supervisor())
     _autostart_task = asyncio.create_task(_autostart())
@@ -333,6 +363,7 @@ async def lifespan(app: FastAPI):
     _audio_watch = asyncio.create_task(_watch_audio())
     _bluetooth_watch = asyncio.create_task(pairing.run())
     _media_watch = asyncio.create_task(_watch_media())
+    _network_watch = asyncio.create_task(_watch_network())
 
     yield
 
@@ -343,7 +374,8 @@ async def lifespan(app: FastAPI):
     events.events.shutdown()
 
     for task in (_autostart_task, _geocoder, _audio_watch,
-                 _bluetooth_watch, _media_watch, _supervisor):
+                 _bluetooth_watch, _media_watch, _network_watch,
+                 _supervisor):
         if task is not None:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -426,6 +458,17 @@ class SettingsBody(BaseModel):
 
 class VolumeBody(BaseModel):
     percent: int
+
+
+class ModeBody(BaseModel):
+    mode: str
+
+
+class JoinBody(BaseModel):
+    ssid: str
+    # Absent for an open network, or one already saved -- the library
+    # tries the saved profile first.
+    password: str | None = None
 
 
 class PositionBody(BaseModel):
@@ -861,6 +904,50 @@ async def post_media(which: str, action: str) -> dict:
     playing = await routes.media_command(which, action)
     events.events.publish('media', playing)
     return playing
+
+
+# --- Network ----------------------------------------------------------------
+
+@api.get('/network')
+async def get_network() -> dict:
+    """Wi-Fi and hotspot together: one radio, one reading."""
+    return await routes.network_status()
+
+
+@api.post('/network/mode')
+async def post_network_mode(body: ModeBody) -> dict:
+    """wifi, hotspot or off. Takes a while -- services have to stop
+    and start, and an association has to be made."""
+    state = await routes.network_mode(body.mode)
+    events.events.publish('network', state)
+    return state
+
+
+@api.get('/network/networks')
+async def get_networks(rescan: bool = True) -> list[dict]:
+    """What is in range. Takes a few seconds with rescan on."""
+    return await routes.network_scan(rescan)
+
+
+@api.post('/network/connect')
+async def post_network_connect(body: JoinBody) -> dict:
+    state = await routes.network_connect(body.ssid, body.password)
+    events.events.publish('network', state)
+    return state
+
+
+@api.post('/network/disconnect')
+async def post_network_disconnect() -> dict:
+    state = await routes.network_disconnect()
+    events.events.publish('network', state)
+    return state
+
+
+@api.delete('/network/networks/{ssid}')
+async def delete_network(ssid: str) -> dict:
+    state = await routes.network_forget(ssid)
+    events.events.publish('network', state)
+    return state
 
 
 # --- Events -----------------------------------------------------------------

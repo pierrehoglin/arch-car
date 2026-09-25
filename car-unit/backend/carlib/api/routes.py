@@ -20,7 +20,8 @@ from carlib.core.errors import (
 from carlib.location import geocoding, places
 from carlib.navigation import routing
 from carlib.radio import fm
-from carlib.system import audio, bluetooth, pipewire, source
+from carlib.system import (audio, bluetooth, hotspot, pipewire,
+                           source, wifi)
 
 # Library exceptions to HTTP status. Anything unmapped is a 500, which
 # is correct: an unexpected exception is a bug here, not a client
@@ -383,6 +384,83 @@ async def media_command(which: str, action: str) -> dict:
     if action not in source.ACTIONS:
         raise NotFoundError('action', action, list(source.ACTIONS))
     return (await source.command(which, action)).to_dict()
+
+
+# --- Network ----------------------------------------------------------------
+#
+# Wi-Fi and the hotspot are one radio, so they are one setting with
+# two positions rather than two switches that can disagree. The
+# library already treats them that way: stopping the hotspot offers
+# to put Wi-Fi back.
+#
+# No off. The car is either on a network or serving one -- there is
+# nothing a third position would be for, and a radio that can be
+# switched off is one somebody can strand themselves with.
+
+MODES = ('wifi', 'hotspot')
+
+
+async def network_status() -> dict:
+    """Both halves in one reading, so a screen cannot show a stale
+    one beside a fresh one."""
+    return {
+        'wifi': (await wifi.status()).to_dict(),
+        'hotspot': (await hotspot.status()).to_dict(),
+    }
+
+
+async def network_mode(mode: str) -> dict:
+    """
+    Put the radio into one of its two states.
+
+    Order matters. The hotspot holds the interface, so it comes down
+    before Wi-Fi goes up -- the other way round leaves both fighting
+    over wlan0 and neither working.
+    """
+    if mode not in MODES:
+        raise NotFoundError('mode', mode, list(MODES))
+
+    if mode == 'hotspot':
+        await hotspot.start()
+    else:
+        await hotspot.stop(restore_wifi=True)
+        await wifi.set_enabled(True)
+
+    return await network_status()
+
+
+async def network_scan(rescan: bool = True) -> list[dict]:
+    """
+    What is in range.
+
+    Slow: nmcli has to ask the card to sweep the band and then wait
+    for the results to settle. `rescan=false` returns the last sweep,
+    which is what a screen re-opening wants.
+    """
+    return [found.to_dict() for found in await wifi.scan(rescan)]
+
+
+async def network_connect(ssid: str, password: str | None) -> dict:
+    """
+    Join a network.
+
+    No password means either an open network or one already saved --
+    the library tries the saved profile first, which is what makes
+    reconnecting work without asking again.
+    """
+    await wifi.connect(ssid, password)
+    return await network_status()
+
+
+async def network_disconnect() -> dict:
+    await wifi.disconnect()
+    return await network_status()
+
+
+async def network_forget(ssid: str) -> dict:
+    """Drop the saved profile, so the car stops joining on its own."""
+    await wifi.forget(ssid)
+    return await network_status()
 
 
 # --- Settings ---------------------------------------------------------------

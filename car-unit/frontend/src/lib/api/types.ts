@@ -343,3 +343,55 @@ export interface NowPlaying {
    *  anything is the ordinary state, not an error. */
   present: boolean
 }
+
+
+/* The radio. Wi-Fi and the hotspot share one interface, so they are
+ * reported together -- a screen showing a fresh one beside a stale
+ * one would be showing an impossible state.
+ */
+
+export interface WifiState {
+  enabled: boolean
+  connected: boolean
+  ssid: string
+  /** 0 to 100, or null when not associated. */
+  signal: number | null
+  ip_address: string
+  device: string
+}
+
+export interface HotspotState {
+  active: boolean
+  ssid: string
+  channel: number | null
+  band: string
+  interface: string
+  address: string
+  /** Which connection the hotspot shares out. */
+  uplink: string
+  clients: unknown[]
+}
+
+/** A network in range. */
+export interface WifiNetwork {
+  ssid: string
+  /** 0 to 100. */
+  signal: number
+  /** Empty or '--' for an open network. */
+  security: string
+  channel: string
+  rate: string
+  /** Whether this is the one currently joined. */
+  in_use: boolean
+  /** Whether there is a profile for it, so no password is needed. */
+  saved: boolean
+}
+
+export interface NetworkState {
+  wifi: WifiState
+  hotspot: HotspotState
+}
+
+/** The two positions the one radio has. The car is either on a
+ *  network or serving one; there is no off. */
+export type NetworkMode = 'wifi' | 'hotspot'

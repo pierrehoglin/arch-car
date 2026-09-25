@@ -21,9 +21,71 @@
     toggleSearch,
   } from '$lib/bluetooth.svelte'
   import type { BtDevice } from '$lib/api/types'
+  import Segmented from '$lib/ui/Segmented.svelte'
+  import KeyboardInput from '$lib/ui/KeyboardInput.svelte'
+  import {
+    disconnect as leaveWifi,
+    forget as forgetWifi,
+    join,
+    mode,
+    network,
+    networks,
+    refresh as refreshNetwork,
+    scan,
+    secured,
+    setMode,
+  } from '$lib/network.svelte'
+  import type { WifiNetwork } from '$lib/api/types'
 
-  /* No subscription here: the root layout follows Bluetooth for the
-     whole session, so this screen only reads what is already there. */
+  /* No subscription here: the root layout follows Bluetooth and the
+     radio for the whole session, so this screen only reads what is
+     already there. The one fetch covers arriving before anything
+     happened to be published. */
+  $effect(() => {
+    refreshNetwork()
+  })
+
+  const net = $derived(mode())
+  const nearby = $derived(networks())
+
+  /* The network being joined for the first time, waiting on a
+     password. Null the rest of the time. */
+  let joining = $state<WifiNetwork | null>(null)
+  let password = $state('')
+
+  $effect(() => {
+    password = joining ? '' : ''
+  })
+
+  /* Saved and open networks join straight away -- the daemon tries
+     the stored profile first, which is what makes reconnecting work
+     without being asked again. Only a secured network nobody has
+     joined before needs the keyboard. */
+  function tap(ap: WifiNetwork): void {
+    if (ap.in_use) {
+      leaveWifi()
+    } else if (ap.saved || !secured(ap)) {
+      join(ap.ssid)
+    } else {
+      joining = ap
+    }
+  }
+
+  /** Signal as five steps, the same shape the radio scan uses. */
+  const bars = (signal: number) =>
+    Math.min(5, Math.max(1, Math.round(signal / 20)))
+
+  /* What the hotspot or the connection is called, under the switch.
+     Off says what it means on its own. */
+  const netDetail = $derived(
+    net === 'hotspot'
+      ? network.state.hotspot.ssid
+        ? `Serving ${network.state.hotspot.ssid}`
+        : 'Serving a network'
+      : network.state.wifi.connected
+        ? `${network.state.wifi.ssid} · ${network.state.wifi.ip_address}`
+        : 'Not connected to anything',
+  )
 
   const on = $derived(bluetooth.state.adapter.service_active)
   const found = $derived(devices())
@@ -67,6 +129,151 @@
     else pair(device.address)
   }
 </script>
+
+<!-- One control, not two switches. Wi-Fi and the hotspot share the
+     interface, so the car is on a network or serving one, never both
+     and never neither -- two switches would let the screen ask for
+     something that cannot happen. -->
+<Card eyebrow="Network" gap="s">
+  <Row title="Wi-Fi" detail={netDetail} />
+
+  <Segmented
+    label="Network mode"
+    value={net}
+    disabled={network.changing}
+    options={[
+      { value: 'wifi', label: 'Wi-Fi' },
+      { value: 'hotspot', label: 'Hotspot' },
+    ]}
+    onchange={(next) => setMode(next as 'wifi' | 'hotspot')}
+  />
+
+  {#if net === 'wifi'}
+    <div class="head">
+      <span class="count">
+        {#if network.scanning}
+          Scanning
+        {:else if nearby.length}
+          {nearby.length} found
+        {:else}
+          Nothing in range
+        {/if}
+      </span>
+
+      <Button
+        variant="quiet"
+        working={network.scanning}
+        disabled={network.scanning || network.changing}
+        onclick={() => scan()}
+      >
+        {#if network.scanning}
+          <Spinner size={16} label="Scanning" />
+        {:else}
+          <Icon name="wifi" size={18} />
+        {/if}
+        Scan
+      </Button>
+    </div>
+
+    {#if nearby.length}
+      <ul class="networks">
+        {#each nearby as ap (ap.ssid)}
+          {@const busy = network.busy === ap.ssid}
+          <li class="network" class:joined={ap.in_use}>
+            <span class="strength" aria-hidden="true">
+              {#each [1, 2, 3, 4, 5] as step (step)}
+                <i
+                  class:lit={step <= bars(ap.signal)}
+                  style:height="{2 + step * 2}px"
+                ></i>
+              {/each}
+            </span>
+
+            <span class="ssid">{ap.ssid}</span>
+
+            {#if secured(ap)}
+              <Icon name="lock" size={16} />
+            {/if}
+
+            {#if ap.saved}
+              <span class="badge">Saved</span>
+            {/if}
+
+            <Button
+              variant={ap.in_use ? 'quiet' : 'primary'}
+              working={busy}
+              disabled={busy || !!network.busy}
+              onclick={() => tap(ap)}
+            >
+              {#if busy}
+                <Spinner size={16} label="Working" />
+              {/if}
+              {ap.in_use ? 'Disconnect' : ap.saved ? 'Connect' : 'Join'}
+            </Button>
+
+            {#if ap.saved}
+              <Button
+                variant="quiet"
+                square
+                label="Forget {ap.ssid}"
+                disabled={!!network.busy}
+                onclick={() => forgetWifi(ap.ssid)}
+              >
+                <Icon name="trash" size={20} />
+              </Button>
+            {/if}
+          </li>
+        {/each}
+      </ul>
+    {/if}
+  {/if}
+
+  {#if network.changing}
+    <p class="note">
+      <Spinner size={16} label="Switching" />
+      Switching takes a moment — services stop and start, and the car
+      has to associate.
+    </p>
+  {:else if network.error}
+    <p class="warning">{network.error}</p>
+  {/if}
+</Card>
+
+<Dialog
+  open={!!joining}
+  title="Join {joining?.ssid ?? ''}"
+  width={560}
+  onclose={() => (joining = null)}
+>
+  {#if joining}
+    <div class="join">
+      <KeyboardInput
+        value={password}
+        label="Password"
+        placeholder="Network password"
+        maxlength={63}
+        onchange={(value) => (password = value)}
+      />
+      <p class="note">
+        Saved once it connects, so the car joins on its own next time.
+      </p>
+    </div>
+  {/if}
+
+  {#snippet footer()}
+    <Button variant="quiet" onclick={() => (joining = null)}>Cancel</Button>
+    <Button
+      variant="primary"
+      disabled={password.length < 8}
+      onclick={() => {
+        if (joining) join(joining.ssid, password)
+        joining = null
+      }}
+    >
+      Join
+    </Button>
+  {/snippet}
+</Dialog>
 
 <Card eyebrow="Bluetooth" gap="none" trim>
   <Row title="Bluetooth" detail={summary}>
@@ -271,6 +478,78 @@
     margin: 0;
     font-size: 13px;
     color: var(--danger);
+  }
+
+  .networks {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .network {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-s);
+    min-height: 62px;
+    padding: 0 var(--spacing);
+    color: var(--text-dim);
+    background: var(--panel-2);
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+  }
+
+  .network.joined {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .ssid {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  /* Bars rather than a percentage: nobody chooses a network by the
+     number, only by which is stronger. */
+  .strength {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 14px;
+  }
+
+  .strength i {
+    width: 3px;
+    background: var(--text-faint);
+    border-radius: 1px;
+  }
+
+  .strength i.lit {
+    background: var(--text);
+  }
+
+  .join {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing);
+    padding-bottom: var(--spacing-s);
+  }
+
+  .note {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    margin: 0;
+    font-size: 13px;
+    color: var(--text-dim);
   }
 
   .confirm {

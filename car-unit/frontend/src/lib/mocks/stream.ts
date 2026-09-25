@@ -33,6 +33,7 @@ export const stream = sse('/api/events', ({ client, request }) => {
   send('pairing', device.btPending())
   send('media', device.mediaNow('bluetooth'))
   send('media', device.mediaNow('spotify'))
+  send('network', device.networkState())
 
   const unsubscribe = device.subscribe(send)
 

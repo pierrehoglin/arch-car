@@ -668,3 +668,114 @@ export function mediaSeek(source: string, ms: number) {
   emit('media', reading)
   return reading
 }
+
+
+/* The radio.
+ *
+ * One interface, two positions: on a network, or serving one. The
+ * mock enforces that too -- it is the one place two could be true at
+ * once, which is exactly the state the screen exists to prevent.
+ */
+
+let net = {
+  wifi: {
+    enabled: true, connected: true, ssid: 'Garaget',
+    signal: 72, ip_address: '192.168.1.44', device: 'wlan0',
+  },
+  hotspot: {
+    active: false, ssid: 'car-unit', channel: null as number | null,
+    band: '', interface: 'wlan0', address: '', uplink: '',
+    clients: [] as unknown[],
+  },
+}
+
+export const networkState = () => ({
+  wifi: { ...net.wifi },
+  hotspot: { ...net.hotspot, clients: [...net.hotspot.clients] },
+})
+
+export function setNetworkMode(mode: string) {
+  if (mode === 'hotspot') {
+    net = {
+      wifi: { ...net.wifi, enabled: false, connected: false, ssid: '',
+              signal: null, ip_address: '' },
+      hotspot: { ...net.hotspot, active: true, channel: 6, band: '2.4 GHz',
+                 address: '192.168.50.1', uplink: 'wwan0' },
+    }
+  } else {
+    net = {
+      wifi: { ...net.wifi, enabled: true, connected: true, ssid: 'Garaget',
+              signal: 72, ip_address: '192.168.1.44' },
+      hotspot: { ...net.hotspot, active: false, channel: null, band: '',
+                 address: '', uplink: '', clients: [] },
+    }
+  }
+
+  emit('network', networkState())
+  return networkState()
+}
+
+
+/* Networks in range.
+ *
+ * A mix on purpose: one joined, one saved but out of use, open ones,
+ * a weak one, and a nameless hidden network the list has to drop.
+ */
+const AIR = [
+  { ssid: 'Garaget', signal: 74, security: 'WPA2', channel: '6',
+    rate: '270 Mbit/s', in_use: true, saved: true },
+  { ssid: 'Huset', signal: 61, security: 'WPA2', channel: '11',
+    rate: '270 Mbit/s', in_use: false, saved: true },
+  { ssid: 'Grannen_5G', signal: 47, security: 'WPA3', channel: '36',
+    rate: '540 Mbit/s', in_use: false, saved: false },
+  { ssid: 'Telia-4F2A91', signal: 33, security: 'WPA2', channel: '1',
+    rate: '130 Mbit/s', in_use: false, saved: false },
+  { ssid: 'McDonalds Free', signal: 22, security: '', channel: '6',
+    rate: '65 Mbit/s', in_use: false, saved: false },
+  { ssid: '', signal: 18, security: 'WPA2', channel: '9',
+    rate: '65 Mbit/s', in_use: false, saved: false },
+]
+
+let air = AIR.map((a) => ({ ...a }))
+
+export const wifiScan = () => air.map((a) => ({ ...a }))
+
+function joined(ssid: string): void {
+  air = air.map((a) => ({ ...a, in_use: a.ssid === ssid }))
+  const one = air.find((a) => a.ssid === ssid)
+  net = {
+    hotspot: { ...net.hotspot },
+    wifi: {
+      ...net.wifi, enabled: true, connected: !!one, ssid,
+      signal: one?.signal ?? null, ip_address: '192.168.1.44',
+    },
+  }
+  emit('network', networkState())
+}
+
+export function wifiConnect(ssid: string) {
+  const one = air.find((a) => a.ssid === ssid)
+  if (one) one.saved = true
+  joined(ssid)
+  return networkState()
+}
+
+export function wifiDisconnect() {
+  air = air.map((a) => ({ ...a, in_use: false }))
+  net = {
+    hotspot: { ...net.hotspot },
+    wifi: { ...net.wifi, connected: false, ssid: '', signal: null,
+            ip_address: '' },
+  }
+  emit('network', networkState())
+  return networkState()
+}
+
+export function wifiForget(ssid: string) {
+  air = air.map((a) =>
+    a.ssid === ssid ? { ...a, saved: false, in_use: false } : a,
+  )
+  if (net.wifi.ssid === ssid) return wifiDisconnect()
+  emit('network', networkState())
+  return networkState()
+}

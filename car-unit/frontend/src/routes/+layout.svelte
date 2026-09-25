@@ -6,6 +6,7 @@
   import { connect, disconnect } from '$lib/api/stream.svelte'
   import { adjust, audio, setMuted, setVolume, watch } from '$lib/audio.svelte'
   import { watch as watchBluetooth } from '$lib/bluetooth.svelte'
+  import { watch as watchNetwork } from '$lib/network.svelte'
   import PairingDialog from '$lib/ui/PairingDialog.svelte'
   import { accent, display, themeAttr } from '$lib/settings.svelte'
   import '../app.css'
@@ -59,6 +60,10 @@
      can start pairing at any moment, and whoever is driving will not
      be looking at Connectivity when it does. */
   $effect(() => watchBluetooth())
+
+  /* The header shows the radio on every screen, so it is followed
+     here rather than by the settings page that changes it. */
+  $effect(() => watchNetwork())
 
   /* Theme goes on the document element rather than a wrapper, so the
      page background matches during overscroll. The accent is set

@@ -26,11 +26,13 @@
   import IconHeadphones from '~icons/tabler/headphones'
   import IconHeadset from '~icons/tabler/headset'
   import IconKeyboard from '~icons/tabler/keyboard'
+  import IconLock from '~icons/tabler/lock'
   import IconLaptop from '~icons/tabler/device-laptop'
   import IconMobile from '~icons/tabler/device-mobile'
   import IconMouse from '~icons/tabler/mouse'
   import IconPrinter from '~icons/tabler/printer'
   import IconRouter from '~icons/tabler/router'
+  import IconWifi from '~icons/tabler/wifi'
   import IconSpeaker from '~icons/tabler/device-speaker'
   import IconTv from '~icons/tabler/device-tv'
   import IconArrowDown from '~icons/tabler/arrow-down'
@@ -99,11 +101,13 @@
     headphones: IconHeadphones,
     headset: IconHeadset,
     keyboard: IconKeyboard,
+    lock: IconLock,
     laptop: IconLaptop,
     mobile: IconMobile,
     mouse: IconMouse,
     printer: IconPrinter,
     router: IconRouter,
+    wifi: IconWifi,
     speaker: IconSpeaker,
     tv: IconTv,
     backspace: IconBackspace,

@@ -280,6 +280,46 @@ export const handlers = [
     )
   }),
 
+  http.get('/api/network', async () => {
+    await wait(NORMAL_MS)
+    return HttpResponse.json(device.networkState())
+  }),
+
+  http.post('/api/network/mode', async ({ request }) => {
+    const { mode } = await body<{ mode: string }>(request)
+    /* Services stopping and starting, and an association being made.
+       A switch that flicked instantly here would hide that the real
+       one takes its time. */
+    await wait(2500)
+    return HttpResponse.json(device.setNetworkMode(mode))
+  }),
+
+  http.get('/api/network/networks', async ({ request }) => {
+    const rescan = new URL(request.url).searchParams.get('rescan')
+    /* A sweep of the band really does take seconds; returning the
+       last one is quick, which is the difference the screen shows. */
+    await wait(rescan === 'false' ? NORMAL_MS : 2800)
+    return HttpResponse.json(device.wifiScan())
+  }),
+
+  http.post('/api/network/connect', async ({ request }) => {
+    const { ssid } = await body<{ ssid: string }>(request)
+    await wait(2200)
+    return HttpResponse.json(device.wifiConnect(ssid))
+  }),
+
+  http.post('/api/network/disconnect', async () => {
+    await wait(600)
+    return HttpResponse.json(device.wifiDisconnect())
+  }),
+
+  http.delete('/api/network/networks/:ssid', async ({ params }) => {
+    await wait(NORMAL_MS)
+    return HttpResponse.json(
+      device.wifiForget(decodeURIComponent(String(params.ssid))),
+    )
+  }),
+
   http.get('/api/places', async () => {
     await wait(NORMAL_MS)
     return HttpResponse.json(SAVED_PLACES)

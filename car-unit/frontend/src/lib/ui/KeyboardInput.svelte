@@ -29,7 +29,10 @@
   let {
     value,
     label,
-    placeholder = '',
+    // No default: an empty string would be passed on and override
+    // the keyboard's own, which is the one thing a default here is
+    // meant to avoid.
+    placeholder,
     maxlength = 24,
     onchange,
   }: Props = $props()
@@ -58,6 +61,7 @@
   <Keyboard
     initial={value}
     {label}
+    {placeholder}
     {maxlength}
     ondone={(next) => {
       onchange(next)

@@ -34,6 +34,7 @@ const KNOWN = [
   'bluetooth',
   'pairing',
   'media',
+  'network',
 ] as const
 
 const handlers = new Map<string, Set<Handler>>()

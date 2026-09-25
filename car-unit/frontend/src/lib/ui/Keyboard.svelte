@@ -21,6 +21,10 @@
     /** What the field held when the keyboard opened. */
     initial: string
     label: string
+    /** Shown in the buffer while it is empty. The caller's, because
+     *  only the caller knows what is being typed -- a station name
+     *  and a network password want different words. */
+    placeholder?: string
     maxlength?: number
 
     /** The caller's input, edited directly. Its presence is what
@@ -35,6 +39,7 @@
   let {
     initial,
     label,
+    placeholder = 'Type something',
     maxlength = 24,
     target,
     onchange,
@@ -257,7 +262,7 @@
         type="text"
         value={initial}
         {maxlength}
-        placeholder="Type a name"
+        {placeholder}
         aria-label={label}
         autocomplete="off"
         spellcheck="false"

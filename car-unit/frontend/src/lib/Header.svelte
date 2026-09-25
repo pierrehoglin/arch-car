@@ -2,6 +2,7 @@
   import Icon from './Icon.svelte'
   import { status } from './status.svelte'
   import { bluetooth, connected } from './bluetooth.svelte'
+  import { mode, network, online } from './network.svelte'
 
   interface Props {
     title: string
@@ -35,6 +36,21 @@
    * is already current wherever you are. */
   const radio = $derived(bluetooth.state.adapter.service_active)
   const phone = $derived(connected())
+
+  /* The radio's own badge. Hotspot and Wi-Fi are different enough to
+     be worth different marks: one means the car is on a network, the
+     other that it is serving one. */
+  const net = $derived(mode())
+  const netIcon = $derived(net === 'hotspot' ? 'router' : 'wifi')
+  const netLabel = $derived(
+    net === 'hotspot'
+      ? `Hotspot${network.state.hotspot.ssid
+          ? `, ${network.state.hotspot.ssid}`
+          : ''}`
+      : network.state.wifi.connected
+        ? `Wi-Fi, ${network.state.wifi.ssid}`
+        : 'Wi-Fi, not connected',
+  )
 
   /* The speaker shows roughly how loud it is, so the icon means
      something at a glance rather than only saying "audio". Muted
@@ -113,10 +129,18 @@
       <span class="temp">{outside}°</span>
     {/if}
 
+    <a
+      class="net"
+      class:idle={!online()}
+      href="/settings/connectivity"
+      aria-label={netLabel}
+    >
+      <Icon name={netIcon} size={22} />
+    </a>
+
     {#if radio}
       <a
         class="bluetooth"
-        class:connected={!!phone}
         href="/settings/connectivity"
         aria-label={phone
           ? `Bluetooth, ${phone.name} connected`
@@ -284,6 +308,27 @@
   /* A link rather than a readout: the whole point is that it takes
      you to the pairing screen, and that is not discoverable if it
      looks like the signal bars beside it. */
+  /* Dimmed when the car is neither on a network nor serving one --
+     it is still a thing you can go and change, so it stays rather
+     than disappearing the way the Bluetooth badge does when its
+     service is stopped. */
+  .net {
+    display: grid;
+    place-items: center;
+    padding: 9px 7px;
+    color: var(--text);
+    border-radius: var(--radius-sm);
+  }
+
+  .net.idle {
+    color: var(--text-dim);
+  }
+
+  .net:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
   .bluetooth {
     display: grid;
     place-items: center;
