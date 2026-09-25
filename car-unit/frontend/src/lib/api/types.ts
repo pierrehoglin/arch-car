@@ -336,6 +336,9 @@ export interface NowPlaying {
   /** A URL on the provider's CDN, or empty. */
   art: string
   track_id: string
+  /** Whether the position can be set. MPRIS can; AVRCP cannot, so a
+   *  Bluetooth slider is a readout rather than a control. */
+  seekable: boolean
   /** Whether there is a player at all. A phone that has not started
    *  anything is the ordinary state, not an error. */
   present: boolean

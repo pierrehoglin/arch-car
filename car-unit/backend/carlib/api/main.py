@@ -428,6 +428,10 @@ class VolumeBody(BaseModel):
     percent: int
 
 
+class PositionBody(BaseModel):
+    ms: int
+
+
 class DefaultBody(BaseModel):
     node_id: int
 
@@ -829,6 +833,20 @@ async def get_media(which: str) -> dict:
     state, not an error.
     """
     return await routes.media_now(which)
+
+
+@api.post('/media/{which}/position')
+async def post_media_position(which: str, body: PositionBody) -> dict:
+    """
+    Move to a point in the track, in milliseconds.
+
+    MPRIS only -- `seekable` on the reading says which sources take
+    it. Registered before the action route, or `position` would be
+    matched as an action name.
+    """
+    playing = await routes.media_seek(which, body.ms)
+    events.events.publish('media', playing)
+    return playing
 
 
 @api.post('/media/{which}/{action}')

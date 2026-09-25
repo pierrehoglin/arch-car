@@ -20,5 +20,12 @@ export type Action =
 export const now = (source: string) =>
   request<NowPlaying>(`/media/${source}`)
 
+/** Move to a point in the track, in milliseconds. MPRIS only. */
+export const seek = (source: string, ms: number) =>
+  request<NowPlaying>(`/media/${source}/position`, {
+    method: 'POST',
+    body: { ms },
+  })
+
 export const command = (source: string, action: Action) =>
   request<NowPlaying>(`/media/${source}/${action}`, { method: 'POST' })

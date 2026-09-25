@@ -8,6 +8,7 @@
     media,
     playerOf,
     refresh,
+    seek,
     toggle,
     watch,
   } from '../media.svelte'
@@ -59,6 +60,9 @@
     length={(player.duration ?? 0) / 1000}
     position={elapsed(source) / 1000}
     playing={player.status === 'playing'}
+    onseek={player.seekable
+      ? (seconds) => seek(source, Math.round(seconds * 1000))
+      : undefined}
     onplay={() => toggle(source)}
     onprevious={() => command(source, 'prev')}
     onnext={() => command(source, 'next')}

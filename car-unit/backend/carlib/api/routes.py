@@ -375,6 +375,10 @@ async def media_now(which: str) -> dict:
     return (await source.now_playing(which)).to_dict()
 
 
+async def media_seek(which: str, ms: int) -> dict:
+    return (await source.seek(which, ms)).to_dict()
+
+
 async def media_command(which: str, action: str) -> dict:
     if action not in source.ACTIONS:
         raise NotFoundError('action', action, list(source.ACTIONS))

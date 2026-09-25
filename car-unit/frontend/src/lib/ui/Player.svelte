@@ -31,6 +31,9 @@
     queue?: Queued[]
 
     onplay?: (playing: boolean) => void
+    /** Given only by a source that can be seeked. Without it the bar
+     *  is a readout: AVRCP has no absolute position, so dragging it
+     *  over Bluetooth could only lie. */
     onseek?: (seconds: number) => void
     onprevious?: () => void
     onnext?: () => void
@@ -88,6 +91,9 @@
 
 <div class="progress">
   <span class="time">{clock(position)}</span>
+  <!-- onchange, not oninput: a drag fires per pixel, and each one
+       would be a seek the player has to act on. This sends where the
+       thumb was let go. -->
   <input
     type="range"
     min="0"
@@ -95,7 +101,8 @@
     value={position}
     style:--fill="{elapsed}%"
     aria-label="Position"
-    oninput={(e) => onseek?.(+e.currentTarget.value)}
+    disabled={!onseek}
+    onchange={(e) => onseek?.(+e.currentTarget.value)}
   />
   <span class="time">{clock(length)}</span>
 </div>
@@ -219,6 +226,15 @@
     background: var(--knob);
     border: 0;
     border-radius: 50%;
+  }
+
+  /* A readout when there is nothing to seek with -- but a complete
+     one. The thumb stays: it is where the track has got to, which is
+     worth seeing whether or not it can be dragged. Only the dragging
+     goes. */
+  input[type='range']:disabled {
+    cursor: default;
+    opacity: 1;
   }
 
   input[type='range']:focus-visible {

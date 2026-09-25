@@ -265,6 +265,14 @@ export const handlers = [
     return HttpResponse.json(device.mediaNow(String(params.source)))
   }),
 
+  http.post('/api/media/:source/position', async ({ params, request }) => {
+    const { ms } = await body<{ ms: number }>(request)
+    await wait(NORMAL_MS)
+    return HttpResponse.json(
+      device.mediaSeek(String(params.source), ms),
+    )
+  }),
+
   http.post('/api/media/:source/:action', async ({ params }) => {
     await wait(NORMAL_MS)
     return HttpResponse.json(

@@ -691,6 +691,13 @@ class NowPlaying:
     position: int | None = None
     art: str = ''
     track_id: str = ''
+    # Whether the position can be set.
+    #
+    # MPRIS can. AVRCP cannot: BlueZ exposes Position read-only and
+    # offers no seek method, and the relative FastForward and Rewind
+    # are press-and-hold operations most phone apps ignore. So a
+    # slider over Bluetooth is a readout, not a control.
+    seekable: bool = False
     # Whether anything is there at all. A phone with no media session
     # has no player, which is not an error -- it is the ordinary state
     # before you press play.
@@ -718,6 +725,11 @@ SETTLE_INTERVAL = 0.08
 # waiting for the position to follow. Short, because it is the gap
 # between two notifications about the same event, not a round trip.
 POSITION_GRACE = 0.6
+
+# How close counts as having arrived after a seek. The track keeps
+# playing while we ask, so the position read back is always a little
+# past the one that was set.
+SEEK_ARRIVED = 1000
 
 
 def _plain(text: str) -> str:
@@ -843,6 +855,7 @@ async def _from_mpris(source: str) -> NowPlaying:
         position=player.position,
         art=player.art,
         track_id=player.track_id,
+        seekable=True,
         present=True,
     )
 
@@ -872,6 +885,53 @@ async def command(source: str, action: str) -> NowPlaying:
         await _run(PLAYERCTL, '-p', player.name, verb)
 
     return await _settled(source, before)
+
+
+async def seek(source: str, ms: int) -> NowPlaying:
+    """
+    Move to a position in the track.
+
+    MPRIS only. Nothing about AVRCP allows it, so asking says so
+    rather than doing nothing and reporting success.
+    """
+    if source == BLUETOOTH:
+        raise NotAvailableError(
+            'Bluetooth playback cannot be seeked',
+            hint='AVRCP has no absolute position, and BlueZ exposes '
+                 'the property read-only')
+
+    player = await find_mpris(source)
+    if player is None:
+        raise NotFoundError('player', source,
+                            [p.name for p in await mpris_players()])
+
+    target = max(0, int(ms))
+    await _run(PLAYERCTL, '-p', player.name,
+               'position', f'{target / 1000:.3f}')
+
+    return await _reached(source, target)
+
+
+async def _reached(source: str, target: int) -> NowPlaying:
+    """
+    Read until the player reports being roughly where it was sent.
+
+    Roughly, because it carries on playing while we ask: by the time
+    the position comes back it has moved on from the number we set.
+    Anything within a second is the seek having landed.
+    """
+    deadline = time.monotonic() + SETTLE_TIMEOUT
+    playing = await now_playing(source)
+
+    while time.monotonic() < deadline:
+        if (playing.position is not None
+                and abs(playing.position - target) < SEEK_ARRIVED):
+            return playing
+
+        await asyncio.sleep(SETTLE_INTERVAL)
+        playing = await now_playing(source)
+
+    return playing
 
 
 async def _settled(source: str, before: NowPlaying) -> NowPlaying:

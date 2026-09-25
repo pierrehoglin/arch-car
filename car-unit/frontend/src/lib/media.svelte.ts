@@ -28,6 +28,7 @@ const EMPTY: NowPlaying = {
   position: null,
   art: '',
   track_id: '',
+  seekable: false,
   present: false,
 }
 
@@ -198,6 +199,33 @@ export async function command(
     report(cause)
   } finally {
     media.busy = media.busy.filter((held) => held !== source)
+  }
+}
+
+/**
+ * Move to a point in the track.
+ *
+ * Applied at once so the thumb stays where it was let go, then
+ * replaced by what the player reports -- which will already be a
+ * little further on, since it keeps playing while we ask.
+ */
+export async function seek(source: string, ms: number): Promise<void> {
+  const player = playerOf(source)
+  if (!player.seekable) return
+
+  const target = Math.max(
+    0,
+    player.duration === null ? ms : Math.min(ms, player.duration),
+  )
+
+  apply({ ...player, position: target })
+
+  try {
+    apply(await api.seek(source, target))
+    media.error = ''
+  } catch (cause) {
+    report(cause)
+    await refresh(source)
   }
 }
 

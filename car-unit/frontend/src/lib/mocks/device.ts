@@ -606,6 +606,8 @@ function nowPlaying(source: string) {
     // Only Spotify publishes art; AVRCP never does.
     art: source === 'spotify' ? current.art : '',
     track_id: `${source}/${state.index}`,
+    // Only MPRIS can be seeked; AVRCP has no absolute position.
+    seekable: source !== 'bluetooth',
     present: state.present,
   }
 }
@@ -647,6 +649,20 @@ export function mediaCommand(source: string, action: string) {
     state.position = Math.max(0, here + step)
     state.since = Date.now()
   }
+
+  const reading = nowPlaying(source)
+  emit('media', reading)
+  return reading
+}
+
+
+export function mediaSeek(source: string, ms: number) {
+  const state = playing[source]
+  if (!state || source === 'bluetooth') return nowPlaying(source)
+
+  const track = TRACKS[state.index % TRACKS.length]
+  state.position = Math.max(0, Math.min(ms, track.duration))
+  state.since = Date.now()
 
   const reading = nowPlaying(source)
   emit('media', reading)
