@@ -401,11 +401,18 @@ MODES = ('wifi', 'hotspot')
 
 
 async def network_status() -> dict:
-    """Both halves in one reading, so a screen cannot show a stale
-    one beside a fresh one."""
+    """
+    Both halves in one reading, so a screen cannot show a stale one
+    beside a fresh one.
+
+    Saved names come too. A scan takes seconds, and a list that was
+    empty until one finished would hide the network the car is on
+    from the screen you opened to look at it.
+    """
     return {
         'wifi': (await wifi.status()).to_dict(),
         'hotspot': (await hotspot.status()).to_dict(),
+        'saved': await wifi.saved_networks(),
     }
 
 

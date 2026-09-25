@@ -390,6 +390,10 @@ export interface WifiNetwork {
 export interface NetworkState {
   wifi: WifiState
   hotspot: HotspotState
+  /** SSIDs with a stored profile, whether or not they are in range.
+   *  Reported with the status so the list has something to show
+   *  before a scan has finished. */
+  saved: string[]
 }
 
 /** The two positions the one radio has. The car is either on a

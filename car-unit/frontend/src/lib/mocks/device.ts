@@ -692,7 +692,22 @@ let net = {
 export const networkState = () => ({
   wifi: { ...net.wifi },
   hotspot: { ...net.hotspot, clients: [...net.hotspot.clients] },
+  /* Saved profiles, whether or not they are in range. One of them --
+     Sommarstugan -- is deliberately not in the air, so the list has
+     something to show that a scan never finds. */
+  saved: savedNames(),
 })
+
+function savedNames(): string[] {
+  const names = air.filter((a) => a.saved).map((a) => a.ssid)
+  for (const extra of AWAY) {
+    if (!names.includes(extra)) names.push(extra)
+  }
+  return names
+}
+
+/* Saved but nowhere near: the summer house, seen once in July. */
+const AWAY = ['Sommarstugan']
 
 export function setNetworkMode(mode: string) {
   if (mode === 'hotspot') {

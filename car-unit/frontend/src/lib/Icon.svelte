@@ -34,6 +34,7 @@
   import IconQr from '~icons/tabler/qrcode'
   import IconRouter from '~icons/tabler/router'
   import IconWifi from '~icons/tabler/wifi'
+  import IconWifiOff from '~icons/tabler/wifi-off'
   import IconSpeaker from '~icons/tabler/device-speaker'
   import IconTv from '~icons/tabler/device-tv'
   import IconArrowDown from '~icons/tabler/arrow-down'
@@ -110,6 +111,7 @@
     qrcode: IconQr,
     router: IconRouter,
     wifi: IconWifi,
+    'wifi-off': IconWifiOff,
     speaker: IconSpeaker,
     tv: IconTv,
     backspace: IconBackspace,

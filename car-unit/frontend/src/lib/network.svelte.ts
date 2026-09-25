@@ -36,6 +36,7 @@ const EMPTY: NetworkState = {
     uplink: '',
     clients: [],
   },
+  saved: [],
 }
 
 interface Store {
@@ -121,26 +122,104 @@ export async function setMode(next: NetworkMode): Promise<void> {
   }
 }
 
-/* Networks worth listing.
+/** A network as the list shows it. */
+export interface Listed extends WifiNetwork {
+  /** Whether the last sweep actually heard it. A saved network the
+   *  car is nowhere near is still worth a row -- to forget it, or to
+   *  see that the car knows it -- but it has no signal to report. */
+  in_range: boolean
+}
+
+/**
+ * Networks worth listing.
+ *
+ * What the sweep found, plus every saved name whether or not it was
+ * heard. The saved ones are what makes the list useful before a scan
+ * has run: a screen that was empty until one finished would hide the
+ * network the car is on from the person who opened it to look.
  *
  * Nameless ones dropped: a hidden network broadcasts an empty SSID,
- * and a row with no name is one nobody can choose. Strongest first,
- * with whatever is joined at the top -- that is the one being looked
- * for when the list is opened.
+ * and a row with no name is one nobody can choose.
+ *
+ * Joined first, then whatever is in range, then by signal, with the
+ * saved ones ahead of the rest at each level.
+ *
+ * In range before saved, not the other way round: a saved network
+ * the car is nowhere near cannot be joined, so it is a record rather
+ * than a choice, and it belongs under the ones that can.
  */
-export const networks = () =>
-  network.networks
-    .filter((found) => found.ssid.trim())
-    .sort(
-      (a, b) =>
-        Number(b.in_use) - Number(a.in_use) ||
-        Number(b.saved) - Number(a.saved) ||
-        b.signal - a.signal,
-    )
+export function networks(): Listed[] {
+  const { ssid, connected, signal } = network.state.wifi
+  const saved = new Set(network.state.saved)
 
-/** Whether a network needs a password the first time. */
-export const secured = (found: WifiNetwork) =>
-  !!found.security && found.security !== '--'
+  /* in_use and saved come from the status, not from the sweep. The
+     sweep is a snapshot of the air at the moment it ran; joining or
+     forgetting since then has not changed the air, and re-running it
+     to find that out would be a wait for nothing. */
+  const heard = network.networks
+    .filter((found) => found.ssid.trim())
+    .map((found) => ({
+      ...found,
+      in_use: connected && found.ssid === ssid,
+      saved: saved.has(found.ssid),
+      in_range: true,
+    }))
+
+  const seen = new Set(heard.map((found) => found.ssid))
+
+  /* The one we are on, when no sweep has heard it -- on a screen
+     opened before any scan, this is the only thing known for
+     certain. In range by definition: the car is talking to it. */
+  if (connected && ssid.trim() && !seen.has(ssid)) {
+    seen.add(ssid)
+    heard.push({
+      ssid,
+      signal: signal ?? 0,
+      security: '',
+      channel: '',
+      rate: '',
+      in_use: true,
+      saved: saved.has(ssid),
+      in_range: true,
+    })
+  }
+
+  /* Saved names the sweep did not hear: out of range, or no sweep
+     has run yet. */
+  for (const name of network.state.saved) {
+    if (!name.trim() || seen.has(name)) continue
+    seen.add(name)
+
+    heard.push({
+      ssid: name,
+      signal: 0,
+      security: '',
+      channel: '',
+      rate: '',
+      in_use: false,
+      saved: true,
+      in_range: false,
+    })
+  }
+
+  return heard.sort(
+    (a, b) =>
+      Number(b.in_use) - Number(a.in_use) ||
+      Number(b.in_range) - Number(a.in_range) ||
+      Number(b.saved) - Number(a.saved) ||
+      b.signal - a.signal,
+  )
+}
+
+/**
+ * Whether a network needs a password the first time.
+ *
+ * A saved network never does -- and one that was not heard has no
+ * security field to read, so guessing from it would say "open" about
+ * something that is not.
+ */
+export const secured = (found: Listed) =>
+  found.in_range && !!found.security && found.security !== '--'
 
 /**
  * Sweep the band.
@@ -163,7 +242,14 @@ export async function scan(rescan = true): Promise<void> {
   }
 }
 
-/** Run something for one network, marking its row while it runs. */
+/**
+ * Run something for one network, marking its row while it runs.
+ *
+ * No sweep afterwards. Joining, leaving and forgetting all change
+ * what the car is doing, not what is in the air, and the list reads
+ * both of those from the status that comes back -- so a scan here
+ * would be seconds of waiting to learn nothing.
+ */
 async function act(ssid: string, call: () => Promise<NetworkState>) {
   if (network.busy) return
 
@@ -174,12 +260,10 @@ async function act(ssid: string, call: () => Promise<NetworkState>) {
     network.error = ''
   } catch (cause) {
     report(cause)
+    await refresh()
   } finally {
     network.busy = ''
     settling = false
-    /* Without a rescan: joining changes which network is in use, and
-       the list has to show that -- but the band has not changed. */
-    await scan(false)
   }
 }
 

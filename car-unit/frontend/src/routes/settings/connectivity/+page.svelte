@@ -36,7 +36,7 @@
     secured,
     setMode,
   } from '$lib/network.svelte'
-  import type { WifiNetwork } from '$lib/api/types'
+  import type { Listed } from '$lib/network.svelte'
 
   /* No subscription here: the root layout follows Bluetooth and the
      radio for the whole session, so this screen only reads what is
@@ -48,10 +48,11 @@
 
   const net = $derived(mode())
   const nearby = $derived(networks())
+  const inRange = $derived(nearby.filter((ap) => ap.in_range).length)
 
   /* The network being joined for the first time, waiting on a
      password. Null the rest of the time. */
-  let joining = $state<WifiNetwork | null>(null)
+  let joining = $state<Listed | null>(null)
   let password = $state('')
 
   /* The code that joins the car's own network. Only offered while
@@ -66,7 +67,7 @@
      the stored profile first, which is what makes reconnecting work
      without being asked again. Only a secured network nobody has
      joined before needs the keyboard. */
-  function tap(ap: WifiNetwork): void {
+  function tap(ap: Listed): void {
     if (ap.in_use) {
       leaveWifi()
     } else if (ap.saved || !secured(ap)) {
@@ -144,17 +145,10 @@
        same way as every other setting: what it is on the left, what
        it is set to on the right. -->
   <Row title="Wi-Fi" detail={netDetail}>
-    <Segmented
-      label="Network mode"
-      value={net}
-      disabled={network.changing}
-      options={[
-        { value: 'wifi', label: 'Wi-Fi' },
-        { value: 'hotspot', label: 'Hotspot' },
-      ]}
-      onchange={(next) => setMode(next as 'wifi' | 'hotspot')}
-    />
-
+    <!-- Before the control, not after it. The control is what the eye
+         goes to and the finger reaches for, so it stays put: a button
+         appearing to its right would shove it sideways every time the
+         mode changed, under a finger already on its way. -->
     {#if net === 'hotspot'}
       <Button
         variant="quiet"
@@ -165,6 +159,17 @@
         <Icon name="qrcode" size={22} />
       </Button>
     {/if}
+
+    <Segmented
+      label="Network mode"
+      value={net}
+      disabled={network.changing}
+      options={[
+        { value: 'wifi', label: 'Wi-Fi' },
+        { value: 'hotspot', label: 'Hotspot' },
+      ]}
+      onchange={(next) => setMode(next as 'wifi' | 'hotspot')}
+    />
   </Row>
 
   {#if net === 'wifi'}
@@ -172,10 +177,12 @@
       <span class="count">
         {#if network.scanning}
           Scanning
+        {:else if inRange}
+          {inRange} in range
         {:else if nearby.length}
-          {nearby.length} found
+          Saved networks
         {:else}
-          Nothing in range
+          Nothing yet
         {/if}
       </span>
 
@@ -199,14 +206,24 @@
         {#each nearby as ap (ap.ssid)}
           {@const busy = network.busy === ap.ssid}
           <li class="network" class:joined={ap.in_use}>
-            <span class="strength" aria-hidden="true">
-              {#each [1, 2, 3, 4, 5] as step (step)}
-                <i
-                  class:lit={step <= bars(ap.signal)}
-                  style:height="{2 + step * 2}px"
-                ></i>
-              {/each}
-            </span>
+            <!-- Bars for something we heard, a mark for something we
+                 only know about. A saved network out of range has no
+                 signal to draw, and empty bars would read as a very
+                 weak one. -->
+            {#if ap.in_range}
+              <span class="strength" aria-hidden="true">
+                {#each [1, 2, 3, 4, 5] as step (step)}
+                  <i
+                    class:lit={step <= bars(ap.signal)}
+                    style:height="{2 + step * 2}px"
+                  ></i>
+                {/each}
+              </span>
+            {:else}
+              <span class="away" aria-hidden="true">
+                <Icon name="wifi-off" size={16} />
+              </span>
+            {/if}
 
             <span class="ssid">{ap.ssid}</span>
 
@@ -214,14 +231,16 @@
               <Icon name="lock" size={16} />
             {/if}
 
-            {#if ap.saved}
+            {#if !ap.in_range}
+              <span class="badge">Not in range</span>
+            {:else if ap.saved}
               <span class="badge">Saved</span>
             {/if}
 
             <Button
               variant={ap.in_use ? 'quiet' : 'primary'}
               working={busy}
-              disabled={busy || !!network.busy}
+              disabled={busy || !!network.busy || (!ap.in_range && !ap.in_use)}
               onclick={() => tap(ap)}
             >
               {#if busy}
@@ -576,6 +595,14 @@
 
   .strength i.lit {
     background: var(--text);
+  }
+
+  /* Where the bars would be, so the names still line up. */
+  .away {
+    display: grid;
+    place-items: center;
+    width: 17px;
+    color: var(--text-faint);
   }
 
   .join {
