@@ -11,6 +11,7 @@
     savePreset,
     scan,
   } from '../radio.svelte'
+  import { nameForPi } from '../stations'
 
   interface Props {
     open: boolean
@@ -50,12 +51,19 @@
      band. */
   const ordered = $derived(
     [...found].sort((a, b) => {
-      const named = Number(!!b.rds_name) - Number(!!a.rds_name)
+      const named =
+        Number(!!(b.rds_name || nameForPi(b.pi))) -
+        Number(!!(a.rds_name || nameForPi(a.pi)))
       return named || a.frequency - b.frequency
     }),
   )
 
-  const identified = $derived(found.filter((s) => s.rds_name).length)
+  /* Named either way: by what it called itself, or by its PI. A
+     station recognised from its code is identified as much as one
+     that announced itself. */
+  const identified = $derived(
+    found.filter((s) => s.rds_name || nameForPi(s.pi)).length,
+  )
 
   /** Signal strength as five steps, 0 to 30 dB over the noise floor. */
   const bars = (power: number) =>
@@ -105,10 +113,15 @@
           </span>
 
           <span class="labels">
-            <!-- Unnamed stations show the frequency as their name,
+            <!-- The PI code stands in where the name did not
+                 decode: a scan gives each station only a second or
+                 two, which is often enough for the identifier and
+                 not for the name. Failing both, the frequency --
                  rather than an empty line where a name would be. -->
             <span class="name">
-              {station.rds_name || `${station.frequency.toFixed(1)} MHz`}
+              {station.rds_name ||
+                nameForPi(station.pi) ||
+                `${station.frequency.toFixed(1)} MHz`}
             </span>
             {#if station.rds_name}
               <span class="frequency">

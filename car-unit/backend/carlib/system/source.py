@@ -34,6 +34,7 @@ Requires:
 
 import time
 import asyncio
+import contextlib
 from dataclasses import dataclass, field, asdict
 from typing import AsyncIterator
 
@@ -46,6 +47,11 @@ PLAYERCTL = 'playerctl'
 # The pseudo-source for our own radio pipeline, which has no MPRIS
 # interface to find.
 FM = 'fm'
+# A phone over AVRCP, folded in beside FM. It is not an MPRIS
+# player and never appears on the bus, so without this the
+# supervisor cannot see it -- starting music on the phone would
+# leave the radio playing underneath, and the two would mix.
+BT = 'bluetooth'
 
 # playerctl reports these; only the first means audio is coming out.
 PLAYING = 'Playing'
@@ -333,6 +339,20 @@ async def status() -> SourceState:
             or f'{radio_state.frequency:.1f} MHz',
         ))
 
+    # The phone, if it has a media session. Folded in like FM so
+    # the supervisor arbitrates all three without special-casing
+    # any of them.
+    with contextlib.suppress(CarError):
+        phone = await _from_avrcp()
+        if phone.present and phone.title:
+            players.insert(0, Player(
+                name=BT,
+                status=(PLAYING if phone.status == 'playing'
+                        else 'Paused'),
+                artist=phone.artist,
+                title=phone.title,
+            ))
+
     active = next((p.name for p in players if p.playing), '')
 
     return SourceState(
@@ -353,11 +373,34 @@ async def pause(name: str) -> None:
         await radio.pause()
         return
 
+    if name == BT:
+        # AVRCP, not playerctl: the phone is not on the bus.
+        from carlib.bluetooth import media
+        with contextlib.suppress(CarError):
+            await media.control('pause')
+        return
+
     try:
         await _run(PLAYERCTL, '-p', name, 'pause')
     except NotAvailableError:
         pass        # gone, or does not support pausing
 
+
+def _same_track(a: Player, b: Player) -> bool:
+    """
+    Whether two sources are playing the same thing.
+
+    Title only, normalised. Artist and album are not comparable
+    across transports -- playerctl joins several artists into one
+    string where AVRCP sends a single name, and albums are
+    abbreviated differently -- so requiring those to match means
+    never matching.
+    """
+    if not a.title or not b.title:
+        return False
+
+    return (' '.join(a.title.split()).casefold()
+            == ' '.join(b.title.split()).casefold())
 
 async def pause_others(keep: str = '') -> list[str]:
     """
@@ -368,11 +411,21 @@ async def pause_others(keep: str = '') -> list[str]:
     car as a target entirely.
     """
     state = await status()
+    winner = next((p for p in state.players if p.name == keep), None)
     paused = []
 
     for player in state.players:
         if player.name == keep or not player.playing:
             continue
+
+        # One session arriving twice is not a conflict. A phone
+        # playing Spotify over Bluetooth is reported by AVRCP and
+        # by the Connect device both; pausing the 'other' one
+        # pauses the session, stopping the music that just
+        # started.
+        if winner is not None and _same_track(winner, player):
+            continue
+
         await pause(player.name)
         paused.append(player.name)
 

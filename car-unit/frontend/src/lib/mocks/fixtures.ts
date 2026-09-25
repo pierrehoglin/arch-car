@@ -29,19 +29,27 @@ export interface Broadcast {
   programType?: string
 }
 
+/* Real PI codes, from the published Swedish table.
+ *
+ * Invented ones look harmless and are not: E302 reads as reference
+ * 02, which is SR P2, so a made-up code for Rockklassiker would have
+ * the mock disagreeing with the lookup it exists to exercise.
+ *
+ * P2 is E402 rather than E202: the middle nibble is the coverage
+ * area and genuinely varies, which is the case worth having here. */
 export const BROADCASTS: Broadcast[] = [
-  { frequency: 92.7, power: 24.0, name: 'P3', pi: '0x2202',
+  { frequency: 92.7, power: 24.0, name: 'P3', pi: '0xE203',
     radiotext: 'Musikguiden i P3', programType: 'Pop music' },
   { frequency: 96.3, power: 14.3, name: '', pi: '' },
-  { frequency: 96.9, power: 20.8, name: 'P2', pi: '0x2201',
+  { frequency: 96.9, power: 20.8, name: 'P2', pi: '0xE402',
     radiotext: 'Klassiskt på P2', programType: 'Serious classical' },
-  { frequency: 99.2, power: 19.7, name: 'Mix Megapol', pi: '0xE24A',
+  { frequency: 99.2, power: 19.7, name: 'Mix Megapol', pi: '0xE243',
     radiotext: 'Mix Megapol — bara hits!', programType: 'Pop music' },
-  { frequency: 101.9, power: 15.2, name: 'Rockklassiker', pi: '0xE302',
+  { frequency: 101.9, power: 15.2, name: 'Rockklassiker', pi: '0xE2A0',
     radiotext: 'Rockklassiker', programType: 'Rock music' },
-  { frequency: 102.8, power: 19.7, name: 'Bandit Rock', pi: '0xE311',
+  { frequency: 102.8, power: 19.7, name: 'Bandit Rock', pi: '0xE2A7',
     radiotext: 'Bandit Rock', programType: 'Rock music' },
-  { frequency: 105.7, power: 12.4, name: 'P4 Sundsvall', pi: '0x2204',
+  { frequency: 105.7, power: 12.4, name: 'P4 Sundsvall', pi: '0xE224',
     radiotext: 'P4 Västernorrland', programType: 'Current affairs' },
   { frequency: 107.4, power: 10.6, name: 'RIX FM', pi: '0xE241',
     radiotext: 'Bäst musik just nu!', programType: 'Pop music' },
@@ -62,6 +70,9 @@ export function stateFor(frequency: number, decoded: boolean): RadioState {
   return {
     playing: true,
     frequency,
+    // Where it would come back on. While something is playing
+    // that is wherever it is now.
+    last: frequency,
     name: station?.name ?? '',
     gain: 40,
     paused: false,

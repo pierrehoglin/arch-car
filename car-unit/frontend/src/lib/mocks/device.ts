@@ -96,7 +96,16 @@ export function setPaused(paused: boolean): RadioState {
 
 export function stop(): RadioState {
   clearTimeout(decodeTimer)
-  radio = { ...radio, playing: false, paused: false, frequency: null }
+  /* frequency goes, `last` stays: a stopped radio is not on a
+     frequency, but it still has one to come back to -- which is
+     what the dial shows on a screen opened with the radio off. */
+  radio = {
+    ...radio,
+    playing: false,
+    paused: false,
+    frequency: null,
+    last: radio.frequency ?? radio.last,
+  }
   emit('fm', radio)
   return radio
 }

@@ -24,6 +24,14 @@ interface Store {
   signals: Signal[]
   scanning: boolean
   busy: boolean
+  /** Where the dial is heading while a retune is in flight.
+   *
+   *  Retuning restarts the whole pipeline, which takes seconds. The
+   *  frequency is known the moment the button is pressed, so showing
+   *  it straight away is honest -- what is not yet known is whether
+   *  anything is there, which is what the spinner says. Null for a
+   *  seek, whose destination the daemon finds. */
+  pending: number | null
   error: string
 }
 
@@ -45,6 +53,7 @@ export const radio = $state<Store>({
   signals: [],
   scanning: false,
   busy: false,
+  pending: null,
   error: '',
 })
 
@@ -58,8 +67,19 @@ function report(cause: unknown): void {
 }
 
 /** Run an action, applying whatever state comes back. */
-async function act(action: () => Promise<RadioState>): Promise<void> {
+/**
+ * Run a command, holding the dial where it is heading.
+ *
+ * `target` is set before the request goes, not after it lands, which
+ * is the whole point: the screen shows the new frequency at the
+ * moment of the press rather than three seconds later.
+ */
+async function act(
+  action: () => Promise<RadioState>,
+  target: number | null = null,
+): Promise<void> {
   radio.busy = true
+  radio.pending = target
   try {
     radio.state = await action()
     radio.error = ''
@@ -67,15 +87,27 @@ async function act(action: () => Promise<RadioState>): Promise<void> {
     report(cause)
   } finally {
     radio.busy = false
+    radio.pending = null
   }
 }
 
 export const play = (station?: string | number) =>
-  act(() => fm.play(station))
+  act(() => fm.play(station),
+      typeof station === 'number' ? station : null)
+
 export const pause = () => act(fm.pause)
 export const toggle = () => act(fm.toggle)
 export const stop = () => act(fm.stop)
-export const tune = (offset: number) => act(() => fm.tune(offset))
+
+/* Known before the daemon answers: a step is arithmetic. */
+export const tune = (offset: number) =>
+  act(() => fm.tune(offset),
+      radio.state.frequency === null
+        ? null
+        : Math.round((radio.state.frequency + offset) * 10) / 10)
+
+/* Not known: the daemon sweeps until it finds a signal, and where it
+   stops is the answer. Nothing to show but the spinner. */
 export const seek = (direction: 1 | -1) => act(() => fm.seek(direction))
 
 export async function refresh(): Promise<void> {

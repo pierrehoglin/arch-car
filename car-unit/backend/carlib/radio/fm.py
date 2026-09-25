@@ -296,6 +296,14 @@ class RadioState:
     pid: int | None = None
     started: float | None = None
     rds: Rds = field(default_factory=Rds)
+    # Where the radio would come back on.
+    #
+    # A stopped radio has no frequency -- that is what `frequency`
+    # being null means -- but it does have somewhere to return to.
+    # A dial reading 87.5 on a screen just opened is wrong about a
+    # car that was on 107.4 yesterday. play() already resumes from
+    # here; this reports the same answer so a screen can show it.
+    last: float | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -504,6 +512,11 @@ def load_last() -> Station | None:
         return None
 
 
+def _last_frequency() -> float | None:
+    """Just the frequency, for reporting in the state."""
+    station = load_last()
+    return station.frequency if station else None
+
 def last_gain() -> float:
     data = _settings.get_dict('last', {})
     try:
@@ -659,7 +672,7 @@ async def status() -> RadioState:
     if not pid or not _alive(pid):
         if data:
             _clear_state()      # stale entry from a crash
-        return RadioState(playing=False)
+        return RadioState(playing=False, last=_last_frequency())
 
     frequency = data.get('frequency')
     name = data.get('name', '')
@@ -690,6 +703,7 @@ async def status() -> RadioState:
 
     return RadioState(
         playing=True,
+        last=_last_frequency(),
         frequency=frequency,
         name=name,
         gain=data.get('gain', DEFAULT_GAIN),
@@ -732,7 +746,7 @@ async def stop() -> RadioState:
             await asyncio.sleep(0.2)
 
     _clear_state()
-    return RadioState(playing=False)
+    return RadioState(playing=False, last=_last_frequency())
 
 
 def default_gain() -> float:

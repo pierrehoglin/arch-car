@@ -35,6 +35,9 @@ export interface RadioState {
   node_id: number | null
   pid: number | null
   started: number | null
+  /** Where the radio would come back on. A stopped radio has no
+   *  `frequency`, but it does have somewhere to return to. */
+  last: number | null
   rds: Rds
 }
 
@@ -70,6 +73,7 @@ export const EMPTY_RDS: Rds = {
 export const EMPTY_RADIO: RadioState = {
   playing: false,
   frequency: null,
+  last: null,
   name: '',
   gain: 40,
   paused: false,

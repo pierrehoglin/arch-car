@@ -40,6 +40,13 @@ export function themeAttr(): ThemeAttr {
   return display.nightPanel ? 'nightpanel' : display.theme
 }
 
+/** Whether the panel is dark.
+ *
+ *  Night Panel is darker than night, so the only light theme is day.
+ *  Written against the attribute rather than the theme so a fourth
+ *  theme cannot be added without this being looked at. */
+export const isDark = (): boolean => themeAttr() !== 'day'
+
 /** The accent, contrast-corrected for the theme.
  *
  *  Night Panel deliberately leaves --accent unset in CSS so the chosen

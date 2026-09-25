@@ -262,19 +262,21 @@ async def _watch_media() -> None:
     we would have to subscribe to twice, once per transport. Reading
     both on a timer is less machinery for the same result.
 
+    Reporting only. Deciding which source wins belongs to
+    source.supervise(), which sees FM and the phone and every
+    MPRIS player at once -- two arbiters would take turns undoing
+    each other.
+
     Position is deliberately left out of the comparison. It moves
     every second by definition, and publishing on it would be a
     message a second for the life of the ignition -- the screen
     extrapolates instead, from the last reading and the status.
     """
     last: dict[str, tuple] = {}
-    # Kept apart from the signature rather than read out of it by
-    # index: the signature is a comparison key, and reordering its
-    # fields should not quietly change what this means.
-    was_playing: dict[str, bool] = {}
+
     # Position, and when it was read, for telling a seek from the
     # track simply playing on.
-    seen: dict[str, tuple[int, float]] = {}
+    seen: dict[str, tuple[int, float, bool]] = {}
 
     while True:
         try:
@@ -290,26 +292,14 @@ async def _watch_media() -> None:
                 # watcher then declined to publish.
                 signature = source.signature(playing)
 
-                moved = _seeked(which, playing, seen, was_playing)
+                moved = _seeked(which, playing, seen)
 
                 if last.get(which) == signature and not moved:
                     continue
 
-                playing_now = playing.status == 'playing'
-                started = playing_now and not was_playing.get(which, False)
-
                 last[which] = signature
-                was_playing[which] = playing_now
                 events.events.publish('media', playing.to_dict())
 
-                # One source at a time. source.supervise() already
-                # does this for FM and MPRIS, but a phone over AVRCP
-                # is not an MPRIS player and is invisible to it -- so
-                # without this, starting Spotify leaves the phone
-                # playing and the two mix.
-                if started:
-                    await _pause_others(which, playing, last,
-                                        was_playing)
 
         except asyncio.CancelledError:
             raise
@@ -319,8 +309,7 @@ async def _watch_media() -> None:
         await asyncio.sleep(MEDIA_POLL)
 
 
-def _seeked(which: str, playing: object, seen: dict,
-            was_playing: dict) -> bool:
+def _seeked(which: str, playing: object, seen: dict) -> bool:
     """
     Whether the position moved further than playing explains.
 
@@ -333,62 +322,20 @@ def _seeked(which: str, playing: object, seen: dict,
     now = time.monotonic()
 
     before = seen.get(which)
-    seen[which] = (position, now) if position is not None else (0, now)
+    seen[which] = ((position, now, playing.status == 'playing')
+                   if position is not None else (0, now, False))
 
     if position is None or before is None:
         return False
 
-    was, at = before
+    # Whether it was playing at the previous reading, which is the
+    # interval this is asking about.
+    was, at, running = before
     # Where it should have reached: forward at real time while
     # playing, standing still otherwise.
-    expected = was + (now - at) * 1000 if was_playing.get(which) else was
+    expected = was + (now - at) * 1000 if running else was
 
     return abs(position - expected) > SEEK_TOLERANCE * 1000
-
-
-async def _pause_others(winner: str, started: object, last: dict,
-                        was_playing: dict) -> None:
-    """
-    Pause every other source.
-
-    The newcomer wins, which is what a car radio does when you pick
-    it from your phone -- and what supervise() does for the sources
-    it can see.
-
-    Except where the other source is playing the same track. A phone
-    playing Spotify over Bluetooth is one Connect session arriving
-    twice, not two sources competing: pausing the "other" one pauses
-    the session, which stops the music that had just started. The
-    screen then shows it paused, the next reading finds it playing
-    again, and the display flickers between the two.
-    """
-    for which in (source.BLUETOOTH, source.SPOTIFY):
-        if which == winner:
-            continue
-
-        try:
-            other = await source.now_playing(which)
-            if other.status != 'playing':
-                continue
-
-            if source.same_track(started, other):
-                log.info('media: %s and %s are one session (%r)',
-                         winner, which, started.title)
-                continue
-
-            # Logged, because the decision to pause is the one that
-            # stops someone's music: when it is wrong, the journal
-            # should say what it compared rather than leaving the
-            # titles to be guessed at.
-            log.info('media: pausing %s (%r) for %s (%r)',
-                     which, other.title, winner, started.title)
-
-            paused = await source.command(which, 'pause')
-            last[which] = source.signature(paused)
-            was_playing[which] = paused.status == 'playing'
-            events.events.publish('media', paused.to_dict())
-        except CarError as exc:
-            log.warning('media: cannot pause %s: %s', which, exc)
 
 
 @contextlib.asynccontextmanager

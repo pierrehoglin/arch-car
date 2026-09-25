@@ -5,6 +5,7 @@
   import PresetDialog from '$lib/ui/PresetDialog.svelte'
   import ScanDialog from '$lib/ui/ScanDialog.svelte'
   import Sortable from '$lib/ui/Sortable.svelte'
+  import Spinner from '$lib/ui/Spinner.svelte'
   import Slider from '$lib/ui/Slider.svelte'
   import {
     play,
@@ -19,11 +20,20 @@
     watch,
   } from '$lib/radio.svelte'
   import type { Station } from '$lib/api/types'
+  import { logoForPi, nameForPi } from '$lib/stations'
+  import { isDark } from '$lib/settings.svelte'
 
   const BAND_MIN = 87.5
   const BAND_MAX = 108.0
 
   let scanOpen = $state(false)
+
+  /* Where the thumb is while it is being dragged.
+   *
+   * Retuning restarts the pipeline, so doing it per pixel would be
+   * unusable -- the reading follows the thumb and the radio only
+   * moves when it is let go. Null when nobody is dragging. */
+  let dragging = $state<number | null>(null)
 
   /* The preset being edited, or null. Holding a chip opens this;
      holding and dragging reorders instead. */
@@ -49,16 +59,50 @@
      and not muted -- either being false means silence, and the
      button should offer to start it. */
   const sounding = $derived(state.playing && !state.paused)
-  const frequency = $derived(state.frequency ?? BAND_MIN)
+  /* What the dial reads, in order: the thumb if a finger is on it,
+     then where a retune is heading, then where the radio actually
+     is, then where it would come back on.
+     
+     The last of those is what a stopped radio shows. Falling
+     straight to the bottom of the band would say 87.5 about a car
+     that was on 107.4 yesterday -- and pressing play would then jump
+     somewhere else, because the daemon resumes from the same place
+     this is reading. */
+  const frequency = $derived(
+    dragging ?? radio.pending ?? state.frequency ?? state.last ?? BAND_MIN,
+  )
   const rds = $derived(state.rds)
+
+  /* Only once the dial has settled. While the thumb is moving, or
+     the pipeline is restarting, the PI still belongs to the
+     station being left -- and its logo over the new frequency
+     would be the wrong answer twice over. */
+  const logo = $derived(
+    dragging === null && !radio.busy
+      ? logoForPi(rds.pi, isDark())
+      : '',
+  )
 
   const preset = $derived(
     radio.presets.find((p) => Math.abs(p.frequency - frequency) < 0.01),
   )
 
   /* Prefer what the station calls itself over what we saved it as:
-     the preset name is a label, the PS is the broadcaster's own. */
-  const name = $derived(rds.ps || preset?.name || state.name)
+     the preset name is a label, the PS is the broadcaster's own.
+     
+     The PI code sits between them. It decodes within a second of
+     tuning, well before PS has assembled, so it fills the gap where
+     a station would otherwise be nameless -- and it is right about
+     stations nobody has saved.
+
+     While the thumb is moving, the RDS belongs to the station still
+     playing and has nothing to do with the frequency under the
+     finger -- so only a saved name is shown, and usually nothing. */
+  const name = $derived(
+    dragging !== null
+      ? (preset?.name ?? '')
+      : rds.ps || preset?.name || nameForPi(rds.pi) || state.name,
+  )
 
   /* Ticks on the band come from the last scan, so an unscanned band
      is simply blank rather than showing invented stations. */
@@ -66,9 +110,22 @@
 </script>
 
 <div class="tuner">
+  <!-- The logo takes the place of the number, not a space beside
+       it: both say which station this is, and the frequency is
+       the answer only until something better arrives. Away from a
+       logo -- dragging, retuning, or a station without one -- the
+       number comes back. -->
   <div class="reading">
-    <span class="figure">{frequency.toFixed(1)}</span>
-    <span class="unit">MHz</span>
+    {#if logo}
+      <img class="mark" src={logo} alt={name} />
+    {:else}
+      <!-- Grouped, so the pair can share a baseline while the
+           group as a whole sits at the foot of the box. -->
+      <span class="numbers">
+        <span class="figure">{frequency.toFixed(1)}</span>
+        <span class="unit">MHz</span>
+      </span>
+    {/if}
   </div>
 
   <!-- Both lines hold their height whether or not there is anything
@@ -77,12 +134,26 @@
        collapsing the block would jump the slider and everything below
        it every time you step through the band. -->
   <div class="station">
-    <h2>{name || ' '}</h2>
+    <!-- A ring where the name goes, while the pipeline restarts.
+         The frequency above has already moved, which says what is
+         happening; this says it is not finished yet. -->
+    {#if radio.busy}
+      <h2 class="tuning">
+        <Spinner size={26} label="Tuning" />
+      </h2>
+    {:else}
+      <h2>{name || ' '}</h2>
+    {/if}
 
     <!-- RadioText scrolls at the station's pace, so it gets a fixed
          line rather than being allowed to reflow the layout when it
-         changes. -->
-    <p class="radiotext">{rds.radiotext || ' '}</p>
+         changes.
+
+         Blank while moving or retuning: it belongs to the station
+         being left behind. -->
+    <p class="radiotext">
+      {dragging !== null || radio.busy ? ' ' : rds.radiotext || ' '}
+    </p>
   </div>
 </div>
 
@@ -96,18 +167,33 @@
     max={BAND_MAX}
     step={0.1}
     ticks={found}
-    onchange={(f) => play(f)}
+    disabled={radio.busy}
+    oninput={(f) => (dragging = f)}
+    onchange={(f) => {
+      dragging = null
+      play(f)
+    }}
   />
 
   <span class="edge">{BAND_MAX.toFixed(1)}</span>
 </div>
 
 <div class="transport">
-  <button class="round small" aria-label="Down 0.1" onclick={() => tune(-0.1)}>
+  <button
+    class="round small"
+    aria-label="Down 0.1"
+    disabled={radio.busy}
+    onclick={() => tune(-0.1)}
+  >
     <Icon name="chevron-left" size={22} />
   </button>
 
-  <button class="round" aria-label="Previous station" onclick={() => seek(-1)}>
+  <button
+    class="round"
+    aria-label="Previous station"
+    disabled={radio.busy}
+    onclick={() => seek(-1)}
+  >
     <Icon name="previous" size={22} />
   </button>
 
@@ -117,16 +203,27 @@
   <button
     class="round primary"
     aria-label={sounding ? 'Pause' : 'Play'}
+    disabled={radio.busy}
     onclick={toggle}
   >
     <Icon name={sounding ? 'pause' : 'play'} size={30} />
   </button>
 
-  <button class="round" aria-label="Next station" onclick={() => seek(1)}>
+  <button
+    class="round"
+    aria-label="Next station"
+    disabled={radio.busy}
+    onclick={() => seek(1)}
+  >
     <Icon name="next" size={22} />
   </button>
 
-  <button class="round small" aria-label="Up 0.1" onclick={() => tune(0.1)}>
+  <button
+    class="round small"
+    aria-label="Up 0.1"
+    disabled={radio.busy}
+    onclick={() => tune(0.1)}
+  >
     <Icon name="chevron-right" size={22} />
   </button>
 </div>
@@ -185,6 +282,11 @@
 
 <style>
   .tuner {
+    /* Taller than the frequency needs, so a logo has room to be
+       a logo rather than a line of type. The number keeps its
+       own size and sits at the foot of the box; the space above
+       it is where a tall logo goes. */
+    --reading: 94px;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -201,10 +303,48 @@
     gap: 2px;
   }
 
+  /* Fixed height, because what goes in it changes.
+     
+     A logo is whatever shape it was drawn, and a short one would
+     make this block shorter than the number it replaced -- taking
+     the slider, the transport and the presets up with it every time
+     RDS decoded or a station changed. */
   .reading {
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    height: var(--reading);
+  }
+
+  .numbers {
     display: flex;
     align-items: baseline;
     gap: var(--spacing-xs);
+  }
+
+  /* Drawn to the height of the number it replaces, so the block does
+     not jump between a station with a logo and one without. Wide is
+     fine; tall is not. */
+  .mark {
+    /* Centred, not at the foot with the number. A logo is a shape
+       rather than a line of type: sitting it on the same line would
+       leave a short one stranded under a tall gap. */
+    align-self: center;
+
+    /* An explicit height, not a maximum.
+       
+       An SVG with only a viewBox has no intrinsic size, so an `img`
+       constrained by max-height alone resolves to nothing and the
+       logo vanishes. Giving the height outright means the browser
+       has something to scale the viewBox against.
+       
+       Width follows the aspect ratio until it hits the cap, and
+       `contain` keeps the shape when it does -- so a very wide
+       wordmark is letterboxed rather than squashed. */
+    height: var(--reading);
+    width: auto;
+    max-width: 420px;
+    object-fit: contain;
   }
 
   /* The frequency is what this screen is for, so it gets the size the
@@ -236,6 +376,18 @@
     white-space: nowrap;
     text-overflow: ellipsis;
     max-width: 560px;
+  }
+
+
+  /* Stands in for the name, and holds its height so the block does
+     not shift when the station arrives. No word beside it: the
+     frequency above has already changed, which says what is
+     happening, and the ring says it is not finished. */
+  .tuning {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-dim);
   }
 
 
@@ -302,6 +454,13 @@
     height: 92px;
     color: var(--accent-ink);
     background: var(--accent);
+  }
+
+  /* Dimmed while the pipeline restarts, so a press that does nothing
+     looks like one that was not going to. */
+  .round:disabled {
+    opacity: 0.4;
+    cursor: default;
   }
 
   .round:active {

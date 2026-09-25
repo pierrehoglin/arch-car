@@ -20,6 +20,11 @@
     /** Values to mark below the track. For a band with known
      *  stations on it. */
     ticks?: number[]
+
+    /** While the thing behind it is changing. Dragging during a
+     *  retune would queue a second one on a dongle already busy
+     *  with the first. */
+    disabled?: boolean
   }
 
   let {
@@ -32,6 +37,7 @@
     oninput,
     onchange,
     ticks = [],
+    disabled = false,
   }: Props = $props()
 
   const share = (of: number) => ((of - min) / (max - min)) * 100
@@ -56,6 +62,7 @@
       {step}
       {value}
       aria-label={label}
+      {disabled}
       style:--fill="{fill}%"
       oninput={(e) => oninput?.(+e.currentTarget.value)}
       onchange={(e) => onchange?.(+e.currentTarget.value)}
