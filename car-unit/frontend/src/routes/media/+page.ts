@@ -36,8 +36,6 @@ export const load = async () => {
   );
 
   const index = readings.findIndex((reading) => reading?.status === 'playing');
-  const player = index === -1 ? FALLBACK : PLAYERS[index].href;
-  console.log(readings, index, player);
 
   /* FM rather than the last source used: there is nowhere to keep
      that yet, and being predictable beats guessing. */

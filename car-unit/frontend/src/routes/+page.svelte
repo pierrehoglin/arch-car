@@ -5,6 +5,15 @@
   import WeatherDialog from '$lib/ui/WeatherDialog.svelte'
   import { iconFor, nameFor, watch, weather } from '$lib/weather.svelte'
   import { coverFor } from '$lib/covers'
+  import { logoForPi, nameForPi } from '$lib/stations'
+  import { isDark } from '$lib/settings.svelte'
+  import {
+    radio,
+    refresh as refreshRadio,
+    seek as seekRadio,
+    toggle as toggleRadio,
+    watch as watchRadio,
+  } from '$lib/radio.svelte'
   import {
     busyWith,
     command,
@@ -64,7 +73,67 @@
   /* Ours for Bluetooth, which never sends any. Everything that shows
      artwork goes through this, so the two screens cannot end up
      disagreeing about when there is a picture. */
-  const cover = $derived(coverFor(track))
+  /* The radio, which the media store knows nothing about -- it is
+     not a player on any bus. Watched here so the tile can show it
+     without opening the FM screen. */
+  $effect(() => {
+    refreshRadio()
+    return watchRadio()
+  })
+
+  const rds = $derived(radio.state.rds)
+
+  /* On air, not merely running: a paused radio is silent, and the
+     tile should be offering whatever else there is. */
+  const onAir = $derived(radio.state.playing && !radio.state.paused)
+
+  /* Nothing behind the station.
+     
+     Spotify keeps its last track while the radio plays -- the
+     supervisor pauses it, it does not forget it -- so its cover is
+     still there to be asked for, and asking would put an album
+     behind a station logo. */
+  const cover = $derived(onAir ? '' : coverFor(track))
+
+  const dial = $derived(
+    radio.state.frequency ?? radio.state.last ?? null,
+  )
+  const mark = $derived(logoForPi(rds.pi, isDark()))
+
+  /* One set of labels and one set of buttons, whichever source is
+     behind them. The tile has room for one thing at a time, and
+     two near-identical branches of markup would drift. */
+  const title = $derived(
+    onAir
+      ? rds.ps || nameForPi(rds.pi) || radio.state.name || 'FM radio'
+      : track?.title || 'Nothing playing',
+  )
+
+  const detail = $derived(
+    onAir
+      ? rds.radiotext ||
+        (dial === null ? 'FM radio' : `${dial.toFixed(1)} MHz`)
+      : track?.artist || 'Pick a source',
+  )
+
+  const sounding = $derived(
+    onAir || track?.status === 'playing',
+  )
+
+  const working = $derived(
+    onAir ? radio.busy : track ? busyWith(track.source) : false,
+  )
+
+  const hasTransport = $derived(onAir || !!track)
+
+  const back = () =>
+    onAir ? seekRadio(-1) : track && command(track.source, 'prev')
+
+  const forward = () =>
+    onAir ? seekRadio(1) : track && command(track.source, 'next')
+
+  const playPause = () =>
+    onAir ? toggleRadio() : track && toggle(track.source)
 </script>
 
 <div class="dashboard">
@@ -99,10 +168,13 @@
          guess as to which you hit. The text is the link instead. -->
     <!-- No eyebrow over artwork. It was the only thing up there, and
          carrying it meant veiling the whole cover to keep it legible
-         -- for a label a track title and transport buttons already
-         make obvious. -->
+    <!-- What is making sound, whichever source it is.
+         
+         The radio takes the tile when it is on air: it is not a
+         player the media store can see, so without this the car
+         would be playing FM under a tile saying nothing playing. -->
     <Card
-      eyebrow={cover ? '' : 'Now playing'}
+      eyebrow={cover || onAir ? '' : 'Now playing'}
       justify="between"
       class={cover ? 'now-playing covered' : 'now-playing'}
     >
@@ -114,50 +186,61 @@
         </div>
       {/if}
 
+      {#if onAir}
+        <!-- The station, in the middle of the tile: its logo where
+             there is one, and the frequency where there is not. Not
+             a background like a cover -- a wordmark spread behind
+             text would be unreadable as both. -->
+        <a class="dial" href="/media/fm">
+          {#if mark}
+            <img class="mark" src={mark} alt={title} />
+          {:else if dial !== null}
+            <span class="tuned">
+              <span class="figure">{dial.toFixed(1)}</span>
+              <span class="unit">MHz</span>
+            </span>
+          {/if}
+        </a>
+      {/if}
+
       <div class="foot" class:over-art={!!cover}>
-        <a class="labels-link" href="/media">
-          {#if !cover}
-            <span class="thumb" class:playing={track?.status === 'playing'}>
+        <a class="labels-link" href={onAir ? '/media/fm' : '/media'}>
+          {#if !cover && !onAir}
+            <span class="thumb" class:playing={sounding}>
               <Icon name="note" size={26} />
             </span>
           {/if}
           <span class="labels">
-            <span class="title">{track?.title || 'Nothing playing'}</span>
-            <span class="detail">
-              {track?.artist || 'Pick a source'}
-            </span>
+            <span class="title">{title}</span>
+            <span class="detail">{detail}</span>
           </span>
         </a>
 
-        {#if track}
-          {@const busy = busyWith(track.source)}
+        {#if hasTransport}
           <div class="transport">
             <Button
               square
-              label="Previous"
-              disabled={busy}
-              onclick={() => command(track.source, 'prev')}
+              label={onAir ? 'Previous station' : 'Previous'}
+              disabled={working}
+              onclick={back}
             >
               <Icon name="previous" size={24} />
             </Button>
 
             <Button
               square
-              label={track.status === 'playing' ? 'Pause' : 'Play'}
-              disabled={busy}
-              onclick={() => toggle(track.source)}
+              label={sounding ? 'Pause' : 'Play'}
+              disabled={working}
+              onclick={playPause}
             >
-              <Icon
-                name={track.status === 'playing' ? 'pause' : 'play'}
-                size={26}
-              />
+              <Icon name={sounding ? 'pause' : 'play'} size={26} />
             </Button>
 
             <Button
               square
-              label="Next"
-              disabled={busy}
-              onclick={() => command(track.source, 'next')}
+              label={onAir ? 'Next station' : 'Next'}
+              disabled={working}
+              onclick={forward}
             >
               <Icon name="next" size={24} />
             </Button>
@@ -263,6 +346,69 @@
     display: flex;
     align-items: center;
     gap: var(--spacing);
+  }
+
+  /* The station, filling the space above the labels.
+     
+     A link like the labels are, because the whole point of looking
+     at it is to go and change it. Padded so a wordmark is not
+     touching the card edges -- the cover treatment can bleed to the
+     edge because it is a backdrop; this is the content. */
+  .dial {
+    position: relative;
+    display: flex;
+    flex: 1;
+    align-items: center;
+    justify-content: center;
+    min-height: 0;
+    padding: var(--spacing-s) var(--spacing-l) var(--spacing);
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .dial:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+  }
+
+  /* Half the tile, whichever way round it is.
+     
+     Positioned rather than laid out in flow: a percentage height
+     against a flex item is a question about whether the parent's
+     height is definite, and the answer has been wrong before. An
+     absolute box with `inset: 0` resolves against the padding box
+     of the positioned ancestor, which it always has.
+     
+     `margin: auto` on all four sides centres it, and `contain`
+     keeps the shape inside the box -- so a wide wordmark uses the
+     width and a tall badge uses the height. */
+  .mark {
+    position: absolute;
+    inset: 0;
+    width: 50%;
+    height: 50%;
+    margin: auto;
+    object-fit: contain;
+  }
+
+  .tuned {
+    display: flex;
+    align-items: baseline;
+    gap: var(--spacing-xs);
+  }
+
+  .figure {
+    font-family: var(--font-display);
+    font-size: 52px;
+    font-weight: 600;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .unit {
+    font-size: 16px;
+    color: var(--text-dim);
   }
 
   /* The text and the thumb are the link; the buttons are not.
