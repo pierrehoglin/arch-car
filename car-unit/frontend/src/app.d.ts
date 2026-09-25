@@ -1,13 +1,12 @@
-// See https://svelte.dev/docs/kit/types#app.d.ts
-// for information about these interfaces
+/// <reference types="@sveltejs/kit" />
+/// <reference types="unplugin-icons/types/svelte" />
+// What types an image import. SvelteKit's generated tsconfig usually
+// pulls this in already; naming it here means a png or jpg import is
+// typed whether or not it does.
+/// <reference types="vite/client" />
+
 declare global {
-	namespace App {
-		// interface Error {}
-		// interface Locals {}
-		// interface PageData {}
-		// interface PageState {}
-		// interface Platform {}
-	}
+  namespace App {}
 }
 
-export {};
+export {}

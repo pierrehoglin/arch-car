@@ -60,6 +60,28 @@ export const playerOf = (source: string): NowPlaying =>
 
 export const busyWith = (source: string) => media.busy.includes(source)
 
+/* The sources the daemon polls, in the order to prefer them. The same
+   order as the tabs, so the dashboard and the media screen agree
+   about which one is "the" player when both have something. */
+const SOURCES = ['spotify', 'bluetooth']
+
+/**
+ * The one worth showing on a screen that has room for one.
+ *
+ * Whatever is playing; failing that, whatever has a track, which is
+ * the source you last listened to and would press play on again.
+ * Null when neither has anything to say.
+ */
+export function current(): NowPlaying | null {
+  const players = SOURCES.map(playerOf)
+
+  return (
+    players.find((player) => player.status === 'playing') ??
+    players.find((player) => player.present && player.title) ??
+    null
+  )
+}
+
 /**
  * How far into the track, in milliseconds.
  *

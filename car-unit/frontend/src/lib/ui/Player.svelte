@@ -140,11 +140,14 @@
     border-radius: inherit;
   }
 
+  /* Square, and the largest that leaves the transport comfortably
+     clear of the bottom: the stage below the tabs is 628px and the
+     rest of the player takes 242px of it. */
   .art {
     display: grid;
     place-items: center;
-    width: 180px;
-    height: 180px;
+    width: 260px;
+    height: 260px;
     color: #fff;
     background: linear-gradient(150deg, var(--from), var(--to));
     border-radius: var(--radius);

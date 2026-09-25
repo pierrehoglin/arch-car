@@ -1,5 +1,6 @@
 <script lang="ts">
   import Card from './Card.svelte'
+  import { coverFor } from '../covers'
   import Player from './Player.svelte'
   import {
     command,
@@ -53,7 +54,7 @@
     artist={player.artist}
     album={player.album}
     via={player.device}
-    art={player.art}
+    art={coverFor(player)}
     {tint}
     length={(player.duration ?? 0) / 1000}
     position={elapsed(source) / 1000}
