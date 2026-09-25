@@ -31,6 +31,7 @@
   import IconMobile from '~icons/tabler/device-mobile'
   import IconMouse from '~icons/tabler/mouse'
   import IconPrinter from '~icons/tabler/printer'
+  import IconQr from '~icons/tabler/qrcode'
   import IconRouter from '~icons/tabler/router'
   import IconWifi from '~icons/tabler/wifi'
   import IconSpeaker from '~icons/tabler/device-speaker'
@@ -106,6 +107,7 @@
     mobile: IconMobile,
     mouse: IconMouse,
     printer: IconPrinter,
+    qrcode: IconQr,
     router: IconRouter,
     wifi: IconWifi,
     speaker: IconSpeaker,

@@ -23,6 +23,7 @@
   import type { BtDevice } from '$lib/api/types'
   import Segmented from '$lib/ui/Segmented.svelte'
   import KeyboardInput from '$lib/ui/KeyboardInput.svelte'
+  import hotspotQr from '$lib/assets/hotspot-qr.svg'
   import {
     disconnect as leaveWifi,
     forget as forgetWifi,
@@ -52,6 +53,10 @@
      password. Null the rest of the time. */
   let joining = $state<WifiNetwork | null>(null)
   let password = $state('')
+
+  /* The code that joins the car's own network. Only offered while
+     the hotspot is up -- there is nothing to scan otherwise. */
+  let showingQr = $state(false)
 
   $effect(() => {
     password = joining ? '' : ''
@@ -135,18 +140,32 @@
      and never neither -- two switches would let the screen ask for
      something that cannot happen. -->
 <Card eyebrow="Network" gap="s">
-  <Row title="Wi-Fi" detail={netDetail} />
+  <!-- The control sits where a switch would, so the row reads the
+       same way as every other setting: what it is on the left, what
+       it is set to on the right. -->
+  <Row title="Wi-Fi" detail={netDetail}>
+    <Segmented
+      label="Network mode"
+      value={net}
+      disabled={network.changing}
+      options={[
+        { value: 'wifi', label: 'Wi-Fi' },
+        { value: 'hotspot', label: 'Hotspot' },
+      ]}
+      onchange={(next) => setMode(next as 'wifi' | 'hotspot')}
+    />
 
-  <Segmented
-    label="Network mode"
-    value={net}
-    disabled={network.changing}
-    options={[
-      { value: 'wifi', label: 'Wi-Fi' },
-      { value: 'hotspot', label: 'Hotspot' },
-    ]}
-    onchange={(next) => setMode(next as 'wifi' | 'hotspot')}
-  />
+    {#if net === 'hotspot'}
+      <Button
+        variant="quiet"
+        square
+        label="Show the code for joining"
+        onclick={() => (showingQr = true)}
+      >
+        <Icon name="qrcode" size={22} />
+      </Button>
+    {/if}
+  </Row>
 
   {#if net === 'wifi'}
     <div class="head">
@@ -238,6 +257,19 @@
     <p class="warning">{network.error}</p>
   {/if}
 </Card>
+
+<!-- The code and nothing else: a title would name what is already
+     in front of you, and a Close button is one more thing to read
+     when tapping anywhere outside does it. -->
+<Dialog
+  open={showingQr}
+  bare
+  title="Join {network.state.hotspot.ssid || 'the car'}"
+  width={420}
+  onclose={() => (showingQr = false)}
+>
+  <img class="qr" src={hotspotQr} alt="" />
+</Dialog>
 
 <Dialog
   open={!!joining}
@@ -478,6 +510,16 @@
     margin: 0;
     font-size: 13px;
     color: var(--danger);
+  }
+
+  /* On white whatever the theme: a scanner reads dark on light, and
+     a code inverted by the night theme is one a phone will not
+     see. */
+  .qr {
+    display: block;
+    width: 100%;
+    background: #fff;
+    border-radius: var(--radius-sm);
   }
 
   .networks {

@@ -16,6 +16,10 @@
     /** How wide, in pixels. Some dialogs carry a list or a grid and
      *  want the room; most read better narrow. */
     width?: number
+    /** No heading and no close button: for a dialog whose whole
+     *  content is the point, where a title would only name what is
+     *  already obvious. Clicking outside still closes it. */
+    bare?: boolean
     children: Snippet
     footer?: Snippet
   }
@@ -26,6 +30,7 @@
     onclose,
     dismissable = true,
     width = 560,
+    bare = false,
     children,
     footer,
   }: Props = $props()
@@ -42,7 +47,8 @@
 <dialog
   bind:this={element}
   style:--width="{width}px"
-  aria-labelledby="dialog-title"
+  aria-labelledby={bare ? undefined : 'dialog-title'}
+  aria-label={bare ? title : undefined}
   onclose={onclose}
   oncancel={(e) => {
     // Escape, which the browser fires as cancel.
@@ -60,20 +66,25 @@
        state, their effects and their timers -- and anything they had
        opened is still open the next time it appears. -->
   {#if open}
-    <div class="panel">
-      <header>
-        <h2 id="dialog-title">{title}</h2>
+    <div class="panel" class:bare>
+      <!-- No heading in bare mode, so the dialog carries the name
+           itself rather than pointing at an element that is not
+           there. -->
+      {#if !bare}
+        <header>
+          <h2 id="dialog-title">{title}</h2>
 
-        <!-- Hidden while something is running, alongside the backdrop
-             and Escape being disabled: all three are the same rule,
-             and a close button that does nothing is worse than
-             none. -->
-        {#if dismissable}
-          <button class="close" aria-label="Close" onclick={onclose}>
-            <Icon name="close" size={22} />
-          </button>
-        {/if}
-      </header>
+          <!-- Hidden while something is running, alongside the
+               backdrop and Escape being disabled: all three are the
+               same rule, and a close button that does nothing is
+               worse than none. -->
+          {#if dismissable}
+            <button class="close" aria-label="Close" onclick={onclose}>
+              <Icon name="close" size={22} />
+            </button>
+          {/if}
+        </header>
+      {/if}
 
       <div class="body">
         {@render children()}
@@ -105,6 +116,16 @@
     /* Dark rather than blurred: a blur costs a full-screen filter
        every frame, and this runs on a Pi. */
     background: rgb(0 0 0 / 0.6);
+  }
+
+  /* Nothing but the content. The side padding goes too, or the
+     content sits in a frame with nothing else in it. */
+  .panel.bare {
+    padding: var(--spacing-s);
+  }
+
+  .panel.bare .body {
+    padding: 0;
   }
 
   .panel {
