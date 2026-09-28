@@ -1,3 +1,4 @@
+import * as api from './api/settings'
 import { accentFor } from './accent'
 import type { Theme, ThemeAttr } from './types'
 
@@ -7,11 +8,15 @@ import type { Theme, ThemeAttr } from './types'
  * the state of a device, not a preference, and they belong to the
  * audio store which the daemon feeds.
  *
- * Nothing left here is wired to the daemon yet. The values live for the
- * session and reset on reload, which is the right shape while the
- * screens are being built -- there is no half-persisted state to
- * reason about, and no backend contract to unpick later.
+ * The theme and the accent are stored by the daemon, under `ui.theme`
+ * and `ui.ambient`. The rest of what is here is not: Night Panel is
+ * a switch rather than a preference, and brightness will come from
+ * the backlight when there is one.
  */
+
+/** Keys the daemon holds for this store. */
+const THEME = 'ui.theme'
+const AMBIENT = 'ui.ambient'
 
 interface Display {
   theme: Theme
@@ -23,7 +28,6 @@ interface Display {
   nightPanel: boolean
   ambient: string
   brightness: number
-  panel: boolean
 }
 
 export const display = $state<Display>({
@@ -31,8 +35,70 @@ export const display = $state<Display>({
   nightPanel: false,
   ambient: '#d8b146',
   brightness: 72,
-  panel: true,
 })
+
+/* Until the stored values have arrived. Writing before then would
+   save the defaults over whatever is on disk -- the screens render
+   immediately, and a theme applied on the way past is still a
+   change as far as a naive save is concerned. */
+let loaded = false
+
+/**
+ * Take the stored preferences.
+ *
+ * Called once, from the root layout. A value that is missing or not
+ * one of the two themes leaves the default alone rather than
+ * applying something the CSS has no palette for.
+ */
+export async function load(): Promise<void> {
+  try {
+    const stored = await api.all()
+
+    const theme = api.valueAt(stored, THEME)
+    if (theme === 'night' || theme === 'day') display.theme = theme
+
+    const ambient = api.valueAt(stored, AMBIENT)
+    if (typeof ambient === 'string' && /^#[0-9a-f]{6}$/i.test(ambient)) {
+      display.ambient = ambient
+    }
+  } catch {
+    /* No daemon, or it has no opinion. The defaults are already in
+       place and the screens work; a car that cannot reach its own
+       settings should still show something. */
+  } finally {
+    loaded = true
+  }
+}
+
+/* One write per change, not per keystroke. Picking through the
+   swatches is several changes in a second, and each one is a file
+   written on a memory card. */
+let pending: ReturnType<typeof setTimeout> | undefined
+
+function save(values: Record<string, unknown>): void {
+  if (!loaded) return
+
+  clearTimeout(pending)
+  pending = setTimeout(() => {
+    api.update(values).catch(() => {
+      /* Nothing to do about it here. The screen already shows the
+         choice; it will simply not survive a reload, and the next
+         change tries again. */
+    })
+  }, 400)
+}
+
+/** Choose a palette. */
+export function setTheme(theme: Theme): void {
+  display.theme = theme
+  save({ [THEME]: theme })
+}
+
+/** Choose the accent. */
+export function setAmbient(swatch: string): void {
+  display.ambient = swatch
+  save({ [AMBIENT]: swatch })
+}
 
 /** What goes on data-theme. Night Panel is a global override: when it
  *  is on it wins whichever theme is underneath. */

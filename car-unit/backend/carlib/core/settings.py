@@ -330,6 +330,13 @@ CATALOGUE: tuple[Known, ...] = (
           'external services. Some weather providers block requests '
           'they cannot attribute.'),
 
+    Known('ui.theme', 'night', 'Which palette the screens use: '
+          'night or day. Night Panel is not stored -- on a real car '
+          'that is a switch on the dashboard, not a preference.'),
+    Known('ui.ambient', '#d8b146', 'The accent colour, as a hex '
+          'swatch. Contrast against the theme is worked out from it '
+          'rather than stored, so the same swatch suits both.'),
+
     Known('web.root', '', 'Directory of the built frontend. Empty '
           'means the daemon serves the API only, which is what the '
           'Vite dev server expects. Set it to the SvelteKit build '

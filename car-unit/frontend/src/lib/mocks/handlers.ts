@@ -280,6 +280,26 @@ export const handlers = [
     )
   }),
 
+  http.get('/api/settings', async () => {
+    await wait(NORMAL_MS)
+    return HttpResponse.json(device.allSettings())
+  }),
+
+  http.put('/api/settings', async ({ request }) => {
+    const { values } = await body<{ values: Record<string, unknown> }>(
+      request,
+    )
+    await wait(NORMAL_MS)
+    return HttpResponse.json(device.updateSettings(values))
+  }),
+
+  http.delete('/api/settings/:key', async ({ params }) => {
+    await wait(NORMAL_MS)
+    return HttpResponse.json(
+      device.resetSetting(decodeURIComponent(String(params.key))),
+    )
+  }),
+
   http.get('/api/network', async () => {
     await wait(NORMAL_MS)
     return HttpResponse.json(device.networkState())

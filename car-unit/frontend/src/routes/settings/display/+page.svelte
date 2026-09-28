@@ -4,7 +4,7 @@
   import Segmented from '$lib/ui/Segmented.svelte'
   import Slider from '$lib/ui/Slider.svelte'
   import Swatches from '$lib/ui/Swatches.svelte'
-  import { display } from '$lib/settings.svelte'
+  import { display, setAmbient, setTheme } from '$lib/settings.svelte'
   import type { Theme } from '$lib/types'
 </script>
 
@@ -17,7 +17,7 @@
         { value: 'day', label: 'Light' },
       ]}
       value={display.theme}
-      onchange={(v: Theme) => (display.theme = v)}
+      onchange={(v: Theme) => setTheme(v)}
     />
   </Row>
 
@@ -34,21 +34,7 @@
     <Swatches
       value={display.ambient}
       theme={display.theme}
-      onchange={(v) => (display.ambient = v)}
-    />
-  </Row>
-</Card>
-
-<Card eyebrow="Screen" gap="none" trim>
-  <Row title="Panel" detail="Waveshare 10.1 DSI touch">
-    <Segmented
-      label="Panel"
-      options={[
-        { value: 'on', label: 'On' },
-        { value: 'off', label: 'Off' },
-      ]}
-      value={display.panel ? 'on' : 'off'}
-      onchange={(v) => (display.panel = v === 'on')}
+      onchange={(v) => setAmbient(v)}
     />
   </Row>
 </Card>

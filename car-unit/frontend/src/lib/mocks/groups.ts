@@ -52,6 +52,12 @@ export const GROUPS: Group[] = [
     paths: ['/api/network'],
   },
   {
+    id: 'settings',
+    label: 'Settings',
+    detail: 'Stored preferences',
+    paths: ['/api/settings'],
+  },
+  {
     id: 'weather',
     label: 'Weather',
     detail: 'Current conditions and the forecast',

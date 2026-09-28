@@ -8,7 +8,12 @@
   import { watch as watchBluetooth } from '$lib/bluetooth.svelte'
   import { watch as watchNetwork } from '$lib/network.svelte'
   import PairingDialog from '$lib/ui/PairingDialog.svelte'
-  import { accent, display, themeAttr } from '$lib/settings.svelte'
+  import {
+    accent,
+    display,
+    load as loadSettings,
+    themeAttr,
+  } from '$lib/settings.svelte'
   import '../app.css'
 
   interface Props {
@@ -64,6 +69,14 @@
   /* The header shows the radio on every screen, so it is followed
      here rather than by the settings page that changes it. */
   $effect(() => watchNetwork())
+
+  /* The stored preferences, once. The screens render before this
+     lands, so the default theme shows for a moment and is then
+     replaced -- which is why the store will not save anything
+     until it has been told what is on disk. */
+  $effect(() => {
+    loadSettings()
+  })
 
   /* Theme goes on the document element rather than a wrapper, so the
      page background matches during overscroll. The accent is set

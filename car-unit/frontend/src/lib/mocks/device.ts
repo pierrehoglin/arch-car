@@ -818,3 +818,58 @@ export function wifiForget(ssid: string) {
   emit('network', networkState())
   return networkState()
 }
+
+
+/* Stored preferences.
+ *
+ * In memory, so they survive a navigation but not a reload -- which
+ * is the honest shape for a mock: the daemon writes a file, and
+ * pretending to do that in a browser tab would only mislead.
+ */
+const SETTING_DEFAULTS: Record<string, unknown> = {
+  'ui.theme': 'night',
+  'ui.ambient': '#d8b146',
+}
+
+let settings: Record<string, unknown> = { ...SETTING_DEFAULTS }
+
+/* Nested on the way out, as the daemon reports it -- the file is a
+   document and the dotted key is an address into it. A flat map here
+   would read fine in development and fail on the unit, which is the
+   one thing a mock must not do. */
+function nest(flat: Record<string, unknown>) {
+  const out: Record<string, unknown> = {}
+
+  for (const [key, value] of Object.entries(flat)) {
+    const parts = key.split('.')
+    let node = out
+
+    for (const part of parts.slice(0, -1)) {
+      if (typeof node[part] !== 'object' || node[part] === null) {
+        node[part] = {}
+      }
+      node = node[part] as Record<string, unknown>
+    }
+
+    node[parts.at(-1) as string] = value
+  }
+
+  return out
+}
+
+export const allSettings = () => nest(settings)
+
+export function updateSettings(values: Record<string, unknown>) {
+  settings = { ...settings, ...values }
+  return allSettings()
+}
+
+export function resetSetting(key: string) {
+  if (key in SETTING_DEFAULTS) {
+    settings = { ...settings, [key]: SETTING_DEFAULTS[key] }
+  } else {
+    const { [key]: _gone, ...rest } = settings
+    settings = rest
+  }
+  return allSettings()
+}
