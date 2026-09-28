@@ -146,14 +146,41 @@ export function savePreset(frequency: number, name: string): Station[] {
     (p) => Math.abs(p.frequency - frequency) < 0.01,
   )
 
+  /* Identity from the radio, but only if it is on this frequency --
+     as the daemon does. RDS cannot be read off-air, and taking it
+     from wherever the dial happens to be would record one station
+     under another's name. */
+  const live =
+    radio.playing && Math.abs((radio.frequency ?? -1) - frequency) < 0.01
+      ? radio.rds
+      : null
+
+  const identity = {
+    pi: live?.pi ?? '',
+    ecc: live?.ecc ?? '',
+    alt_frequencies: [...(live?.alt_frequencies ?? [])],
+  }
+
   /* Order is the user's, so an existing preset keeps its place and a
      new one goes on the end. Sorting by frequency here would throw
      away a reorder on the next rename -- the daemon does the same. */
   if (at === -1) {
-    presets = [...presets, { frequency, name }]
+    presets = [...presets, { frequency, name, ...identity }]
   } else {
     presets = presets.map((p, index) =>
-      index === at ? { frequency, name } : p,
+      index === at
+        ? {
+            frequency,
+            name,
+            /* A rename is not a re-identification: keep what was
+               recorded unless the radio has something now. */
+            pi: identity.pi || p.pi,
+            ecc: identity.ecc || p.ecc,
+            alt_frequencies: identity.alt_frequencies.length
+              ? identity.alt_frequencies
+              : p.alt_frequencies,
+          }
+        : p,
     )
   }
 

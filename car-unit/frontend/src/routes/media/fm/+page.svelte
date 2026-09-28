@@ -11,6 +11,7 @@
     play,
     radio,
     reorderPresets,
+    forgetPreset,
     savePreset,
     seek,
     toggle,
@@ -39,10 +40,6 @@
      holding and dragging reorders instead. */
   let editing = $state<Station | null>(null)
 
-  /* Follow the daemon while this screen is mounted. The stream sends
-     current state on connecting, so there is nothing to fetch first
-     -- and RDS arriving a couple of seconds after a tune comes
-     through as its own event rather than being waited for. */
   /* Fetched as well as watched. The stream replays what it has
      cached, but a screen that opened before the daemon had published
      anything would sit empty -- and presets are published once, at
@@ -73,14 +70,28 @@
   )
   const rds = $derived(state.rds)
 
-  /* Only once the dial has settled. While the thumb is moving, or
-     the pipeline is restarting, the PI still belongs to the
-     station being left -- and its logo over the new frequency
-     would be the wrong answer twice over. */
+  /* Live RDS first, then whatever the preset recorded.
+  
+     The saved code fills the seconds before RDS decodes, which is
+     most of what anyone sees when changing station. The live one
+     wins as soon as it arrives, because a transmitter can be
+     reassigned and a preset cannot know.
+
+     Nothing while the thumb is moving: the preset under the finger
+     changes with every pixel, and a logo flickering past is worse
+     than none. */
   const logo = $derived(
-    dragging === null && !radio.busy
-      ? logoForPi(rds.pi, isDark())
-      : '',
+    dragging !== null
+      ? ''
+      : logoForPi(
+          /* Retuning: only what the preset recorded. The live PI
+             still belongs to the station being left, and `preset` is
+             already looking at where the dial is heading -- so a
+             saved station shows its logo as the pipeline restarts
+             rather than a frequency for two seconds. */
+          radio.busy ? (preset?.pi ?? '') : rds.pi || preset?.pi || '',
+          isDark(),
+        ),
   )
 
   const preset = $derived(
@@ -101,7 +112,12 @@
   const name = $derived(
     dragging !== null
       ? (preset?.name ?? '')
-      : rds.ps || preset?.name || nameForPi(rds.pi) || state.name,
+      : radio.busy
+        ? preset?.name || nameForPi(preset?.pi ?? '')
+        : rds.ps ||
+          preset?.name ||
+          nameForPi(rds.pi || preset?.pi || '') ||
+          state.name,
   )
 
   /* Ticks on the band come from the last scan, so an unscanned band
@@ -235,7 +251,13 @@
     class="presets"
     items={radio.presets}
     key={(item) => item.frequency}
-    onactivate={(item) => play(item.frequency)}
+    onactivate={(item) => {
+      /* Ignored while the pipeline is restarting. The dongle can
+         only be opened by one process, and a second tune before
+         the first has released it fails outright -- the daemon
+         retries, but not asking is better than being rescued. */
+      if (!radio.busy) play(item.frequency)
+    }}
     onhold={(item) => (editing = item)}
     onreorder={(next) => reorderPresets(next)}
     label={(item) =>
@@ -264,7 +286,8 @@
       square
       pressed={!!preset}
       label={preset ? 'Remove from presets' : 'Save as a preset'}
-      onclick={() => savePreset(frequency, name)}
+      onclick={() =>
+        preset ? forgetPreset(preset.frequency) : savePreset(frequency, name)}
     >
       <Icon name={preset ? 'star-filled' : 'star'} size={20} />
     </Button>

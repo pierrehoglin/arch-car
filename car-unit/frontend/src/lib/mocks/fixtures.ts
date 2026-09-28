@@ -25,6 +25,8 @@ export interface Broadcast {
    *  too weak to decode. */
   name: string
   pi: string
+  /** The same programme on other transmitters, as RDS reports it. */
+  alternates?: number[]
   radiotext?: string
   programType?: string
 }
@@ -39,6 +41,7 @@ export interface Broadcast {
  * area and genuinely varies, which is the case worth having here. */
 export const BROADCASTS: Broadcast[] = [
   { frequency: 92.7, power: 24.0, name: 'P3', pi: '0xE203',
+    alternates: [99.3, 105.1],
     radiotext: 'Musikguiden i P3', programType: 'Pop music' },
   { frequency: 96.3, power: 14.3, name: '', pi: '' },
   { frequency: 96.9, power: 20.8, name: 'P2', pi: '0xE402',
@@ -48,6 +51,7 @@ export const BROADCASTS: Broadcast[] = [
   { frequency: 101.9, power: 15.2, name: 'Rockklassiker', pi: '0xE2A0',
     radiotext: 'Rockklassiker', programType: 'Rock music' },
   { frequency: 102.8, power: 19.7, name: 'Bandit Rock', pi: '0xE2A7',
+    alternates: [95.3],
     radiotext: 'Bandit Rock', programType: 'Rock music' },
   { frequency: 105.7, power: 12.4, name: 'P4 Sundsvall', pi: '0xE224',
     radiotext: 'P4 Västernorrland', programType: 'Current affairs' },
@@ -55,11 +59,21 @@ export const BROADCASTS: Broadcast[] = [
     radiotext: 'Bäst musik just nu!', programType: 'Pop music' },
 ]
 
+/* Presets as the daemon stores them: a frequency, a name, and what
+   the station was when it was saved.
+   
+   One is deliberately bare -- saved from the scan dialog rather than
+   while listening, so it never had RDS to record. That is the case
+   the logo lookup has to cope with. */
 export const PRESETS: Station[] = [
-  { frequency: 92.7, name: 'P3' },
-  { frequency: 96.9, name: 'P2' },
-  { frequency: 102.8, name: 'Bandit Rock' },
-  { frequency: 107.4, name: 'RIX FM' },
+  { frequency: 92.7, name: 'P3', pi: '0xE203', ecc: 'E3',
+    alt_frequencies: [99.3, 105.1] },
+  { frequency: 96.9, name: 'P2', pi: '0xE402', ecc: 'E3',
+    alt_frequencies: [] },
+  { frequency: 102.8, name: 'Bandit Rock', pi: '0xE2A7', ecc: 'E3',
+    alt_frequencies: [95.3] },
+  { frequency: 107.4, name: 'RIX FM', pi: '', ecc: '',
+    alt_frequencies: [] },
 ]
 
 export function stateFor(frequency: number, decoded: boolean): RadioState {
@@ -92,6 +106,11 @@ export function stateFor(frequency: number, decoded: boolean): RadioState {
             ps: station.name,
             radiotext: station.radiotext ?? '',
             program_type: station.programType ?? '',
+            /* ECC and the alternates come in group 1A and 0A, which
+               repeat less often than the PI -- so they land with the
+               name rather than ahead of it. */
+            ecc: 'E3',
+            alt_frequencies: station.alternates ?? [],
             stereo: true,
             is_music: true,
             groups: 240,

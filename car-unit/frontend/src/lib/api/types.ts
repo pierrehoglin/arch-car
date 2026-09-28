@@ -8,6 +8,15 @@
 
 export interface Rds {
   pi: string
+  /** Extended country code, from group 1A. The PI's first nibble is
+   *  a country code too, but a coarse one -- E covers Sweden, Spain
+   *  and others -- so this is what says which country's PI table to
+   *  read. Sweden is E3. Arrives later than the PI, and not from
+   *  every station. */
+  ecc: string
+  /** An ISO country code, where a build reports that instead of the
+   *  ECC. The same question answered less precisely. */
+  country: string
   ps: string
   radiotext: string
   program_type: string
@@ -55,10 +64,22 @@ export interface Signal {
 export interface Station {
   frequency: number
   name: string
+  /** What the station is, recorded when the preset was saved while
+   *  it was playing. The PI picks its logo, so a preset carrying one
+   *  can show it the moment it is tuned rather than a second later
+   *  when RDS has decoded. */
+  pi: string
+  /** Which country's PI table applies. Sweden is E3. */
+  ecc: string
+  /** The same programme on other transmitters. Recorded for later;
+   *  nothing reads it yet. */
+  alt_frequencies: number[]
 }
 
 export const EMPTY_RDS: Rds = {
   pi: '',
+  ecc: '',
+  country: '',
   ps: '',
   radiotext: '',
   program_type: '',

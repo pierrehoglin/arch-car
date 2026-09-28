@@ -31,7 +31,8 @@ from dataclasses import dataclass, field, asdict
 
 from carlib.core import settings, state
 from carlib.system import pipewire
-from carlib.core.errors import NotAvailableError, NotFoundError
+from carlib.core.errors import (CarError, NotAvailableError,
+                                NotFoundError)
 
 RTL_FM = 'rtl_fm'
 RTL_TEST = 'rtl_test'
@@ -95,6 +96,12 @@ DEFAULT_GAIN = 40.0
 # enough to catch it.
 START_SETTLE = 1.5
 
+# How long the kernel needs to let go of the dongle after the last
+# process holding it has exited. Long enough to cover a retune the
+# moment the previous one finished, short enough not to be a pause
+# anyone notices.
+DEVICE_RELEASE = 0.5
+
 
 def _runtime_dir() -> Path:
     base = os.environ.get('XDG_RUNTIME_DIR')
@@ -122,6 +129,21 @@ _settings = settings.section('fm')
 class Station:
     frequency: float
     name: str = ''
+    # What the station is, rather than where it was found.
+    #
+    # The PI picks its logo, and having it saved means the screen can
+    # show one the moment a preset is tuned rather than a second or
+    # two later when RDS has decoded. The ECC says which country's PI
+    # table that lookup should read.
+    #
+    # The alternates are the same programme on other transmitters.
+    # Nothing uses them yet; they are recorded now because they are
+    # only available while the station is being listened to, and a
+    # preset saved without them cannot be filled in later without
+    # driving back.
+    pi: str = ''
+    ecc: str = ''
+    alt_frequencies: list[float] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -142,6 +164,15 @@ class Rds:
     """
 
     pi: str = ''                    # station id, stable
+    # Extended country code, from group 1A. The PI's first nibble is
+    # a country code too, but a coarse one -- E covers Sweden, Spain
+    # and others -- so this is what says which country's PI table to
+    # read. Sweden is E3. Arrives later than the PI and not from
+    # every station.
+    ecc: str = ''
+    # An ISO country code, where a build reports that instead of the
+    # ECC. Answers the same question less precisely.
+    country: str = ''
     ps: str = ''                    # 8-char station name
     radiotext: str = ''             # 64-char now-playing or slogan
     program_type: str = ''
@@ -206,6 +237,20 @@ def parse_rds(text: str, into: 'Rds | None' = None) -> Rds:
 
         if 'pi' in group:
             rds.pi = str(group['pi'])
+        # ECC comes in group 1A, which repeats far less often than
+        # the PI -- a minute of listening is not unusual. redsea has
+        # spelled this field differently across versions, so several
+        # names are accepted rather than one guessed at.
+        for key in ('ecc', 'extended_country_code', 'country_code'):
+            if group.get(key):
+                rds.ecc = str(group[key]).upper().replace('0X', '')
+                break
+        else:
+            # Some builds report the country instead, as an ISO code.
+            # Less precise but the same question answered, and better
+            # than nothing on a station that never sends 1A.
+            if group.get('country'):
+                rds.country = str(group['country']).lower()
         if 'prog_type' in group:
             rds.program_type = str(group['prog_type'])
         if 'tp' in group:
@@ -380,17 +425,40 @@ def parse_frequency(value: str | float | int) -> float:
 # --- Presets ---------------------------------------------------------------
 
 def load_presets() -> list[Station]:
+    """
+    Read the saved stations.
+
+    Every field is taken, not just the two that were here first: a
+    reader that names the fields it knows about silently drops
+    everything else, and a preset written with an identity comes back
+    without one on the next read.
+
+    Missing fields are the old shape rather than an error, so presets
+    saved before identity existed still load.
+    """
     stations = []
+
     for entry in _settings.get_list('presets', []):
         if not isinstance(entry, dict):
             continue
+
         try:
-            stations.append(Station(
-                frequency=float(entry['frequency']),
-                name=entry.get('name', ''),
-            ))
+            frequency = float(entry['frequency'])
         except (KeyError, TypeError, ValueError):
             continue
+
+        alternates = entry.get('alt_frequencies') or []
+        if not isinstance(alternates, list):
+            alternates = []
+
+        stations.append(Station(
+            frequency=frequency,
+            name=str(entry.get('name', '')),
+            pi=str(entry.get('pi', '')),
+            ecc=str(entry.get('ecc', '')),
+            alt_frequencies=[float(f) for f in alternates
+                             if isinstance(f, (int, float))],
+        ))
 
     return stations
 
@@ -406,25 +474,77 @@ def save_presets(stations: list[Station]) -> None:
     _settings.set('presets', [s.to_dict() for s in stations])
 
 
-def add_preset(frequency: float, name: str = '') -> list[Station]:
+async def add_preset(frequency: float, name: str = '') -> list[Station]:
     """
     Add or rename a preset. Frequency is the key.
 
     A rename keeps its place; a new one goes on the end. Sorting the
     list here would move a station somebody had dragged somewhere,
     for the unrelated reason that a different one was renamed.
+
+    Identity comes from the radio when the preset being saved is the
+    one playing -- which is the usual way one gets saved. Off-air, a
+    preset is a frequency and a name, and whatever was recorded
+    before is kept rather than blanked.
     """
     stations = load_presets()
+    identity = await _identify(frequency)
 
     for index, existing in enumerate(stations):
         if abs(existing.frequency - frequency) <= 0.01:
-            stations[index] = Station(frequency=frequency, name=name)
+            stations[index] = Station(
+                frequency=frequency,
+                name=name,
+                pi=identity.pi or existing.pi,
+                ecc=identity.ecc or existing.ecc,
+                alt_frequencies=(identity.alt_frequencies
+                                 or existing.alt_frequencies),
+            )
             save_presets(stations)
             return stations
 
-    stations.append(Station(frequency=frequency, name=name))
+    stations.append(Station(
+        frequency=frequency,
+        name=name,
+        pi=identity.pi,
+        ecc=identity.ecc,
+        alt_frequencies=identity.alt_frequencies,
+    ))
     save_presets(stations)
     return stations
+
+
+@dataclass
+class _Identity:
+    pi: str = ''
+    ecc: str = ''
+    alt_frequencies: list[float] = field(default_factory=list)
+
+
+async def _identify(frequency: float) -> _Identity:
+    """
+    What the radio knows about a frequency, if it is on it.
+
+    Empty for anything else. Reading RDS from a station that is not
+    being received is not possible, and guessing from a preset that
+    happens to share the frequency would record one station's
+    identity under another's.
+    """
+    try:
+        current = await status()
+    except CarError:
+        return _Identity()
+
+    if (not current.playing
+            or current.frequency is None
+            or abs(current.frequency - frequency) > 0.01):
+        return _Identity()
+
+    return _Identity(
+        pi=current.rds.pi,
+        ecc=current.rds.ecc,
+        alt_frequencies=list(current.rds.alt_frequencies),
+    )
 
 
 def reorder_presets(frequencies: list[float]) -> list[Station]:
@@ -769,7 +889,8 @@ async def play(station: Station | float | str | None = None,
                gain: float | None = None,
                device: int = 0,
                squelch: int = 0,
-               rds: bool = True) -> RadioState:
+               rds: bool = True,
+               retry: bool = True) -> RadioState:
     """
     Start or resume playback.
 
@@ -902,6 +1023,22 @@ async def play(station: Station | float | str | None = None,
 
     if not _alive(proc.pid):
         _clear_state()
+
+        # Almost always the previous tune, not a broken dongle.
+        #
+        # stop() waits for every process in the old group to exit, but
+        # the kernel releases the USB handle a moment after that --
+        # so a station changed twice in quick succession finds the
+        # device still claimed and rtl_fm gives up at once.
+        #
+        # Worth one more go before saying the radio is broken, since
+        # the alternative is an error message about rtl_test for
+        # something that fixes itself in half a second.
+        if retry:
+            await asyncio.sleep(DEVICE_RELEASE)
+            return await play(target, gain, device, squelch, rds,
+                              retry=False)
+
         raise NotAvailableError(
             f'playback stopped immediately on {target.frequency:.1f} MHz',
             hint='check `rtl_test` sees the dongle and nothing else is '

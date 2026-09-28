@@ -151,9 +151,13 @@
             />
           </Button>
 
+          <!-- Held while the pipeline restarts: the dongle takes one
+               process at a time, and a second tune before the first
+               has released it fails outright. -->
           <Button
             variant={playing ? 'primary' : 'plain'}
             square
+            disabled={radio.busy}
             label="Listen to {station.frequency.toFixed(1)}"
             onclick={() => play(station.frequency)}
           >
