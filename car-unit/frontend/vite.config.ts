@@ -1,5 +1,5 @@
 import { paraglideVitePlugin } from '@inlang/paraglide-js';
-import Icons from 'unplugin-icons/vite'
+import Icons from 'unplugin-icons/vite';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 
@@ -14,6 +14,9 @@ export default defineConfig({
       emitTsDeclarations: true
     })
   ],
+  build: {
+    assetsInlineLimit: 40 * 1024 * 1024 // 40MB
+  },
   server: {
     proxy: {
       '/api': 'http://127.0.0.1:8099'

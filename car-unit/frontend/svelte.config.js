@@ -1,5 +1,5 @@
-import adapter from '@sveltejs/adapter-static'
-import { vitePreprocess } from '@sveltejs/vite-plugin-svelte'
+import adapter from '@sveltejs/adapter-static';
+import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 
 /* A plain SPA build the carlib daemon can serve as static files.
    No SSR: every screen reads live device state, so there is nothing
@@ -17,7 +17,10 @@ export default {
       pages: 'build',
       assets: 'build',
       fallback: 'index.html',
-      precompress: false,
+      precompress: false
     }),
-  },
-}
+    output: {
+      bundleStrategy: 'inline'
+    }
+  }
+};
