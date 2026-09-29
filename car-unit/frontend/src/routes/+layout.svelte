@@ -26,12 +26,6 @@
    * browser but swapped for the nearest, so 400 is here for the
    * keypad entry and 700 for <strong>, neither of which ask for it
    * by name. */
-  import '@fontsource/barlow/latin-400.css'
-  import '@fontsource/barlow/latin-600.css'
-  import '@fontsource/barlow/latin-700.css'
-  import '@fontsource/saira-semi-condensed/latin-400.css'
-  import '@fontsource/saira-semi-condensed/latin-600.css'
-  import '@fontsource/saira-semi-condensed/latin-700.css'
   /* Colour emoji, bundled so it does not depend on what the Pi has
      installed. The package default rather than emoji-400.css: the
      default splits the font into eleven chunks by unicode-range, so
@@ -40,7 +34,6 @@
 
      Its order in the font stacks is what keeps it off the digits;
      see app.css. */
-  import '@fontsource/noto-color-emoji'
   import '../app.css'
 
   interface Props {
