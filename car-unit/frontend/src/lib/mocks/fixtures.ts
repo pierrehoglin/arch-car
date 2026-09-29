@@ -406,11 +406,14 @@ export const BT_DEVICES: BtFixture[] = [
     address: 'AA:BB:CC:DD:EE:02',
     name: "Erik's Pixel",
     icon: 'phone',
-    connected: false,
+    /* Connected too, so the phone screen starts with two to choose
+       between. Disconnect it on the Connectivity page to see the
+       picker go away. */
+    connected: true,
     paired: true,
     trusted: true,
-    rssi: null,
-    battery: null,
+    rssi: -61,
+    battery: 44,
     uuids: [HFP, PBAP, MAP],
   },
   {

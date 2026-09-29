@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 Contacts and call logs over Bluetooth PBAP.
 
@@ -60,7 +61,8 @@ async def main_async(args) -> None:
         return
 
     contacts = await phonebook.fetch(
-        args.address, args.book, args.location, args.raw)
+        args.address, args.book, args.location, args.raw,
+        photos=args.photos)
 
     if args.json:
         emit_json(contacts)
@@ -84,6 +86,8 @@ def main() -> int:
                     help='just count entries')
     ap.add_argument('--filters', action='store_true',
                     help='list supported filter fields')
+    ap.add_argument('--photos', action='store_true',
+                    help='ask for contact photos too; much slower')
     ap.add_argument('--json', action='store_true')
     return run(main_async(ap.parse_args()))
 

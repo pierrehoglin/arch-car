@@ -11,6 +11,8 @@ Locations: 'int' (phone memory) or 'sim1'.
 """
 
 import re
+import base64
+import binascii
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 
@@ -58,7 +60,20 @@ class Contact:
     numbers: list[PhoneNumber] = field(default_factory=list)
     emails: list[str] = field(default_factory=list)
     call_type: str | None = None      # received / dialed / missed
-    call_time: str | None = None      # ISO 8601, local time
+    call_time: str | None = None
+    # A digest of the photo's bytes, once it has been stored. Content
+    # addressed, so two contacts sharing a picture share the file and
+    # a re-sync of an unchanged book rewrites nothing.
+    photo: str = ''
+    # The bytes themselves, while they are passing through. Never
+    # stored on the contact and never serialised -- a base64 blob in
+    # the middle of a JSON cache would make it unreadable and large.
+    photo_data: bytes | None = field(default=None, repr=False)
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data.pop('photo_data', None)
+        return data      # ISO 8601, local time
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -98,11 +113,51 @@ def parse_irmc_datetime(raw: str) -> str | None:
     return raw
 
 
+def _photo_blob(value: str, params: list[str], lines: list[str],
+                index: int) -> tuple[bytes | None, int]:
+    """
+    A PHOTO value as bytes, and where the parser should carry on.
+
+    Two shapes arrive. vCard 3.0 folds the base64 onto continuation
+    lines, which have already been joined by the time this is called,
+    so the whole thing is in `value`. vCard 2.1 -- which is what most
+    phones still speak over PBAP -- runs it across plain lines and
+    ends it with a blank one, and those lines have no colon in them,
+    so the main loop would throw every one of them away.
+
+    A URI value is ignored. It would point at something on the phone,
+    which the car cannot fetch.
+    """
+    encoded = value.strip()
+
+    if not any('BASE64' in p or p == 'ENCODING=B' for p in params):
+        # A URI, or an encoding nobody expected.
+        return None, index
+
+    # Everything up to the blank line, for the 2.1 shape. Harmless
+    # for 3.0, where the next line is the next property and stops it.
+    while index + 1 < len(lines):
+        ahead = lines[index + 1]
+        if not ahead.strip() or ':' in ahead:
+            break
+        encoded += ahead.strip()
+        index += 1
+
+    try:
+        blob = base64.b64decode(encoded, validate=False)
+    except (ValueError, binascii.Error):
+        return None, index
+
+    # A few bytes is a truncated transfer, not a picture.
+    return (blob if len(blob) > 256 else None), index
+
+
 def parse_vcards(text: str) -> list[Contact]:
     """
-    Enough vCard for names, numbers, emails and call-log metadata.
+    Enough vCard for names, numbers, emails, photos and call-log
+    metadata.
 
-    Not a general parser: no photos, no structured addresses, no
+    Not a general parser: no structured addresses, no
     quoted-printable decoding.
     """
     contacts: list[Contact] = []
@@ -111,8 +166,12 @@ def parse_vcards(text: str) -> list[Contact]:
     # RFC 6350 line folding: a leading space continues the previous line.
     text = re.sub(r'\r?\n[ \t]', '', text)
 
-    for line in text.splitlines():
-        line = line.strip()
+    lines = text.splitlines()
+    index = -1
+
+    while index + 1 < len(lines):
+        index += 1
+        line = lines[index].strip()
         if not line:
             continue
 
@@ -149,6 +208,10 @@ def parse_vcards(text: str) -> list[Contact]:
                 PhoneNumber(number=value.strip(), type=label.lower()))
         elif key == 'EMAIL':
             current.emails.append(value.strip())
+        elif key == 'PHOTO':
+            blob, index = _photo_blob(value, params, lines, index)
+            if blob:
+                current.photo_data = blob
         elif key == 'X-IRMC-CALL-DATETIME':
             # Direction arrives either as a bare parameter (;MISSED:) or
             # as TYPE=MISSED, depending on the phone.
@@ -164,21 +227,42 @@ def parse_vcards(text: str) -> list[Contact]:
     return contacts
 
 
+# What a pull asks for when photos are wanted.
+#
+# Named explicitly because the default is the phone's, and most
+# servers leave PHOTO out of it -- a photo is tens of kilobytes and
+# they are sized for a car kit reading names. Asking for it means
+# asking for everything else too, or the phone sends only the photo.
+PHOTO_FIELDS = ['VERSION', 'FN', 'N', 'TEL', 'EMAIL', 'PHOTO',
+                'X-IRMC-CALL-DATETIME']
+
+
 async def fetch(address: str,
                 book: str = 'pb',
                 location: str = 'int',
-                keep_raw: str | None = None) -> list[Contact]:
+                keep_raw: str | None = None,
+                photos: bool = False) -> list[Contact]:
     """
     Pull a phonebook or call log from the phone.
 
     Call logs come back newest first; contacts sorted by name.
+
+    `photos` asks for the PHOTO field as well. Off by default, and
+    deliberately: a book of two hundred contacts with photos is
+    megabytes of base64 over a Bluetooth link, which turns a sync of
+    a few seconds into one of a few minutes. Check the phone offers
+    it first -- filter_fields() says.
     """
+    filters: dict = {}
+    if photos:
+        filters['Fields'] = ('as', PHOTO_FIELDS)
+
     async with obex.session(address, 'pbap') as sess:
         pb = PhonebookAccess1.new_proxy(obex.SERVICE, sess, session_bus())
         await pb.select(location, book)
 
         async with obex.scratch_file(keep_raw, '.vcf') as target:
-            transfer_path, _ = await pb.pull_all(target, {})
+            transfer_path, _ = await pb.pull_all(target, filters)
             await obex.await_transfer(transfer_path)
             contacts = parse_vcards(obex.read_text(target))
 

@@ -900,3 +900,114 @@ export function resetSetting(key: string) {
   }
   return allSettings()
 }
+
+
+/* The phone's books.
+ *
+ * Contacts with more than one number, names that need diacritics,
+ * and a call log spanning today, yesterday and last week -- the
+ * three cases the list has to render differently.
+ */
+const BOOK_CONTACTS = [
+  { name: 'Anna Lind', numbers: [
+      { number: '+46701234567', type: 'cell' },
+      { number: '084112233', type: 'work' }],
+    emails: ['anna@example.se'], call_type: null, call_time: null },
+  { name: 'Astrid Berg', numbers: [{ number: '+46704567890', type: 'cell' }],
+    emails: [], call_type: null, call_time: null },
+  { name: 'Erik Waller', numbers: [{ number: '+46703456789', type: 'cell' }],
+    emails: [], call_type: null, call_time: null },
+  { name: 'Johan Ek', numbers: [{ number: '+46705551234', type: 'cell' }],
+    emails: [], call_type: null, call_time: null },
+  { name: 'Lina Sund', numbers: [{ number: '+46706662345', type: 'cell' }],
+    emails: [], call_type: null, call_time: null },
+  { name: 'Mamma', numbers: [{ number: '+46702345678', type: 'cell' }],
+    emails: [], call_type: null, call_time: null },
+  { name: 'Åke Öberg', numbers: [{ number: '+46707778899', type: 'home' }],
+    emails: [], call_type: null, call_time: null },
+  /* A number saved without a name. Rare and real, and the thing that
+     crashes a list that assumes name[0] exists. */
+  { name: '', numbers: [{ number: '+46709998877', type: 'cell' }],
+    emails: [], call_type: null, call_time: null },
+  /* Starred with an emoji, which is how people pin a contact when
+     the phone has no other way. Belongs at the top. */
+  { name: '⭐ Mamma Mobil', numbers: [
+      { number: '+46702345678', type: 'cell' }],
+    emails: [], call_type: null, call_time: null },
+  /* Email only. Real, and useless in a car -- filtered out. */
+  { name: 'Revisorn', numbers: [],
+    emails: ['revisor@example.se'], call_type: null, call_time: null },
+]
+
+function callAt(hoursAgo: number): string {
+  return new Date(Date.now() - hoursAgo * 3600_000).toISOString()
+}
+
+const BOOK_RECENT = [
+  { name: 'Anna Lind', numbers: [{ number: '+46701234567', type: 'cell' }],
+    emails: [], call_type: 'dialed', call_time: callAt(2) },
+  { name: 'Erik Waller', numbers: [{ number: '+46703456789', type: 'cell' }],
+    emails: [], call_type: 'missed', call_time: callAt(5) },
+  { name: 'Mamma', numbers: [{ number: '+46702345678', type: 'cell' }],
+    emails: [], call_type: 'received', call_time: callAt(20) },
+  { name: '', numbers: [{ number: '+46812345678', type: '' }],
+    emails: [], call_type: 'missed', call_time: callAt(30) },
+  { name: 'Astrid Berg', numbers: [{ number: '+46704567890', type: 'cell' }],
+    emails: [], call_type: 'dialed', call_time: callAt(120) },
+]
+
+const BOOK_FAVOURITES = BOOK_CONTACTS.slice(0, 4)
+
+const BOOK_SOURCES: Record<string, unknown[]> = {
+  pb: BOOK_CONTACTS,
+  fav: BOOK_FAVOURITES,
+  cch: BOOK_RECENT,
+  ich: BOOK_RECENT.filter((c) => c.call_type === 'received'),
+  och: BOOK_RECENT.filter((c) => c.call_type === 'dialed'),
+  mch: BOOK_RECENT.filter((c) => c.call_type === 'missed'),
+}
+
+/* Empty until synced, as a daemon that has never pulled would be.
+   The screen showing a cache before a transfer is the whole design,
+   so a mock that started full would hide it.
+
+   Keyed by phone and book, as the daemon's cache is. The second
+   phone gets a shorter book so that switching between them visibly
+   changes something. */
+const books: Record<string, { contacts: unknown[]; fetched: number }> = {}
+
+function sourceFor(address: string, book: string): unknown[] {
+  const all = BOOK_SOURCES[book] ?? []
+  const first = bluetoothState().devices.find((d) => d.connected)
+  return address === first?.address ? all : all.slice(0, 3)
+}
+
+export function phonebookGet(address: string, book: string) {
+  const held = books[`${address}/${book}`]
+  const phone = bluetoothState().devices.find((d) => d.address === address)
+  return {
+    address,
+    book,
+    contacts: held ? [...held.contacts] : [],
+    fetched: held?.fetched ?? 0,
+    stale: false,
+    /* Follows the Bluetooth mock, so turning the phone off in
+       Settings makes the phone screen behave as it would. */
+    available: !!phone?.connected,
+  }
+}
+
+export function phonebookSync(address: string, book: string) {
+  books[`${address}/${book}`] = {
+    contacts: sourceFor(address, book),
+    fetched: Date.now() / 1000,
+  }
+  return phonebookGet(address, book)
+}
+
+export function phonebookForget(address: string, book?: string) {
+  for (const name of book ? [book] : Object.keys(BOOK_SOURCES)) {
+    delete books[`${address}/${name}`]
+  }
+  return phonebookGet(address, book ?? 'pb')
+}

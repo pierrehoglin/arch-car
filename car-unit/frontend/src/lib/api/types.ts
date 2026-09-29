@@ -424,3 +424,45 @@ export interface NetworkState {
 /** The two positions the one radio has. The car is either on a
  *  network or serving one; there is no off. */
 export type NetworkMode = 'wifi' | 'hotspot'
+
+
+/* The phone's books.
+ *
+ * PBAP serves several through one interface: the address book, the
+ * favourites, and the call logs. They are cached separately, because
+ * they go stale at very different rates -- an address book is good
+ * for weeks, a list of recent calls for minutes.
+ */
+
+export type BookName = 'pb' | 'fav' | 'cch' | 'ich' | 'och' | 'mch'
+
+export interface PhoneNumber {
+  number: string
+  /** cell, home, work -- as the vCard labelled it. */
+  type: string
+}
+
+export interface Contact {
+  name: string
+  numbers: PhoneNumber[]
+  emails: string[]
+  /** For call-log entries: received, dialed or missed. Null on an
+   *  ordinary contact, which is most of them. */
+  call_type: string | null
+  /** ISO 8601, for call-log entries. */
+  call_time: string | null
+}
+
+export interface Book {
+  address: string
+  book: BookName
+  contacts: Contact[]
+  /** Unix seconds, or 0 for a book never pulled. */
+  fetched: number
+  /** Old enough to be worth refreshing. Weeks for contacts, minutes
+   *  for a call log. */
+  stale: boolean
+  /** Whether a sync could work: the phone connected and offering
+   *  PBAP. False means do not try rather than try and wait. */
+  available: boolean
+}

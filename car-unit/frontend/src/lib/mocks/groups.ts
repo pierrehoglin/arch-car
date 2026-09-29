@@ -52,6 +52,12 @@ export const GROUPS: Group[] = [
     paths: ['/api/network'],
   },
   {
+    id: 'phonebook',
+    label: 'Phonebook',
+    detail: "The phone's contacts, favourites and calls",
+    paths: ['/api/phonebook'],
+  },
+  {
     id: 'settings',
     label: 'Settings',
     detail: 'Stored preferences',

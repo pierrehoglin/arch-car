@@ -280,6 +280,39 @@ export const handlers = [
     )
   }),
 
+  http.get('/api/phonebook', async ({ request }) => {
+    const params = new URL(request.url).searchParams
+    await wait(NORMAL_MS)
+    return HttpResponse.json(
+      device.phonebookGet(
+        params.get('address') ?? '',
+        params.get('book') ?? 'pb',
+      ),
+    )
+  }),
+
+  http.post('/api/phonebook/sync', async ({ request }) => {
+    const { address = '', book = 'pb' } = await body<{
+      address?: string
+      book?: string
+    }>(request)
+    /* A transfer of every vCard over Bluetooth. Slow enough that the
+       screen has to show the cache first, which is the point. */
+    await wait(3500)
+    return HttpResponse.json(device.phonebookSync(address, book))
+  }),
+
+  http.delete('/api/phonebook', async ({ request }) => {
+    const params = new URL(request.url).searchParams
+    await wait(NORMAL_MS)
+    return HttpResponse.json(
+      device.phonebookForget(
+        params.get('address') ?? '',
+        params.get('book') ?? undefined,
+      ),
+    )
+  }),
+
   http.get('/api/settings', async () => {
     await wait(NORMAL_MS)
     return HttpResponse.json(device.allSettings())

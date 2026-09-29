@@ -115,7 +115,9 @@
     {:else}
       {#if places.length > 1}
         <div class="places">
-          {#each places as place (place.name)}
+          <!-- By position: saved places are named by whoever saved
+               them, and nothing stops two being called Hemma. -->
+          {#each places as place, index (index)}
             <Button
               variant="quiet"
               pressed={weather.place === place.name}

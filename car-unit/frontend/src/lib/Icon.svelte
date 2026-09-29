@@ -37,6 +37,9 @@
   import IconWifiOff from '~icons/tabler/wifi-off'
   import IconSpeaker from '~icons/tabler/device-speaker'
   import IconTv from '~icons/tabler/device-tv'
+  import IconCallIn from '~icons/tabler/phone-incoming'
+  import IconCallOut from '~icons/tabler/phone-outgoing'
+  import IconCallMissed from '~icons/tabler/phone-x'
   import IconArrowDown from '~icons/tabler/arrow-down'
   import IconArrowLeft from '~icons/tabler/arrow-left'
   import IconArrowRight from '~icons/tabler/arrow-right'
@@ -115,6 +118,9 @@
     speaker: IconSpeaker,
     tv: IconTv,
     backspace: IconBackspace,
+    'call-in': IconCallIn,
+    'call-out': IconCallOut,
+    'call-missed': IconCallMissed,
     down: IconArrowDown,
     left: IconArrowLeft,
     right: IconArrowRight,

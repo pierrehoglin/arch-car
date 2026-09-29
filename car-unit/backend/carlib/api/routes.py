@@ -20,6 +20,9 @@ from carlib.core.errors import (
 from carlib.location import geocoding, places
 from carlib.navigation import routing
 from carlib.radio import fm
+from pathlib import Path
+
+from carlib.bluetooth import contacts, phonebook
 from carlib.system import (audio, bluetooth, hotspot, pipewire,
                            source, wifi)
 
@@ -473,6 +476,129 @@ async def network_forget(ssid: str) -> dict:
     """Drop the saved profile, so the car stops joining on its own."""
     await wifi.forget(ssid)
     return await network_status()
+
+
+# --- Phonebook --------------------------------------------------------------
+#
+# Cached, because a PBAP pull is an OBEX transfer of every vCard on
+# the phone -- seconds at best. The screen reads the cache; syncing is
+# something somebody asks for.
+
+
+async def _phone(address: str | None):
+    """
+    Which phone. The connected one unless told otherwise.
+
+    A car has one phone connected at a time, so making the screen
+    name it would be asking a question it would have to answer by
+    looking at the same list this does.
+    """
+    devices = await bluetooth.devices()
+
+    if address:
+        for device in devices:
+            if device.address.lower() == address.lower():
+                return device
+        raise NotFoundError('device', address,
+                            [d.address for d in devices])
+
+    for device in devices:
+        if device.connected:
+            return device
+
+    raise NotFoundError('connected phone', '', [])
+
+
+
+async def phonebook_get(address: str | None = None,
+                        book: str = 'pb') -> dict:
+    """
+    What is cached for a phone. Empty if it has never been synced.
+
+    `book` picks which: pb for contacts, fav for favourites, cch for
+    recent calls, and ich/och/mch for incoming, outgoing and missed
+    separately.
+
+    `available` says whether a sync could work at all -- the phone
+    has to be connected and offering PBAP. Reported here rather than
+    left for the sync to discover, so a screen can decide not to try
+    instead of waiting out a transfer that was never going to start.
+    """
+    if book not in phonebook.BOOKS:
+        raise NotFoundError('book', book, list(phonebook.BOOKS))
+
+    device = await _phone(address)
+    reading = contacts.load(device.address, book).to_dict()
+    reading['available'] = device.connected and device.supports_pbap
+    return reading
+
+
+async def phonebook_sync(address: str | None = None,
+                         book: str = 'pb',
+                         photos: bool = False) -> dict:
+    """
+    Pull from the phone and replace the cache.
+
+    Slow. The phone must have accepted phonebook access when it
+    paired, which on Android is a checkbox people miss -- so a refusal
+    here usually means permissions rather than a fault.
+    """
+    if book not in phonebook.BOOKS:
+        raise NotFoundError('book', book, list(phonebook.BOOKS))
+
+    device = await _phone(address)
+
+    # Checked before starting rather than discovered by failing. An
+    # OBEX session against a phone that is not offering PBAP hangs
+    # until it times out, which is a long time to leave a screen
+    # saying it is syncing.
+    if not device.connected:
+        raise NotAvailableError(
+            f'{device.name or device.address} is not connected',
+            hint='connect the phone first')
+
+    if not device.supports_pbap:
+        raise NotAvailableError(
+            f'{device.name or device.address} is not offering '
+            'phonebook access',
+            hint='phonebook access is granted when the phone pairs; '
+                 'on Android it is a checkbox on the pairing dialog. '
+                 'Forget the car on the phone and pair again to be '
+                 'asked once more.')
+
+    reading = (await contacts.sync(device.address, book=book,
+                                   photos=photos)).to_dict()
+    reading['available'] = True
+    return reading
+
+
+def phonebook_photo(digest: str) -> Path:
+    """
+    Where a contact's photo is on disk.
+
+    The digest is checked against what we could have written before
+    it touches the filesystem -- it arrives in a URL, and a path that
+    came from outside is not a path.
+    """
+    path = contacts.photo_path(digest)
+    if path is None:
+        raise NotFoundError('photo', digest, [])
+    return path
+
+
+async def phonebook_forget(address: str | None = None,
+                           book: str | None = None) -> dict:
+    """
+    Drop the cache, so the next sync starts clean.
+
+    One book, or every one of them when none is named.
+    """
+    device = await _phone(address)
+    contacts.forget(device.address, book)
+
+    reading = contacts.load(device.address, book or 'pb').to_dict()
+    reading['available'] = device.connected and device.supports_pbap
+    return reading
 
 
 # --- Settings ---------------------------------------------------------------

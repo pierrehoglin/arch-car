@@ -460,6 +460,12 @@ class OrderBody(BaseModel):
     presets: list[PresetRef]
 
 
+class SyncBody(BaseModel):
+    address: str | None = None
+    book: str = 'pb'
+    photos: bool = False
+
+
 class ModeBody(BaseModel):
     mode: str
 
@@ -972,6 +978,58 @@ async def delete_network(ssid: str) -> dict:
     state = await routes.network_forget(ssid)
     events.events.publish('network', state)
     return state
+
+
+# --- Phonebook --------------------------------------------------------------
+
+@api.get('/phonebook')
+async def get_phonebook(address: str | None = None,
+                        book: str = 'pb') -> dict:
+    """
+    The cached contacts for a phone, the connected one by default.
+
+    Empty for a phone that has never been synced, which is the
+    ordinary starting state rather than an error.
+    """
+    return await routes.phonebook_get(address, book)
+
+
+@api.post('/phonebook/sync')
+async def post_phonebook_sync(body: SyncBody) -> dict:
+    """
+    Pull from the phone. Slow -- every vCard over OBEX.
+
+    `book` selects which: pb for contacts, ich/och/mch for the call
+    logs, fav for favourites.
+
+    `photos` asks for pictures as well, which multiplies the
+    transfer -- a long book takes minutes rather than seconds.
+    """
+    return await routes.phonebook_sync(body.address, body.book,
+                                       body.photos)
+
+
+@api.get('/phonebook/photo/{digest}')
+async def get_phonebook_photo(digest: str) -> FileResponse:
+    """
+    A contact's picture.
+
+    Content addressed, so the name never changes for a given image
+    and the browser can keep it -- a phonebook screen would otherwise
+    re-fetch every avatar on every open.
+    """
+    return FileResponse(
+        routes.phonebook_photo(digest),
+        media_type='image/jpeg',
+        headers={'Cache-Control': 'public, max-age=31536000, immutable'},
+    )
+
+
+@api.delete('/phonebook')
+async def delete_phonebook(address: str | None = None,
+                           book: str | None = None) -> dict:
+    """One book, or every one of them when none is named."""
+    return await routes.phonebook_forget(address, book)
 
 
 # --- Events -----------------------------------------------------------------
