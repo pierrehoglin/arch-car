@@ -1,16 +1,29 @@
-/* Saira Semi Condensed for display, Barlow for body -- the two
-   families the design already uses. Served from Google Fonts for
-   now; worth self-hosting before this runs in a car, since a
-   dashboard should not wait on a CDN to render its own labels. */
-@import url('https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Saira+Semi+Condensed:wght@500;600;700&display=swap');
+/* Saira Semi Condensed for display, Barlow for body. Their faces
+ * come from Fontsource, imported in the root layout -- bundled into
+ * the build rather than fetched from a CDN, so a car without signal
+ * still draws its own labels. */
+
 
 :root {
   --accent: #d8b146;
   color-scheme: dark;
 
   /* Type + shape (theme-independent) */
-  --font-display: 'Saira Semi Condensed', system-ui, sans-serif;
-  --font-body: 'Barlow', system-ui, -apple-system, sans-serif;
+  /* Colour emoji after the text face and before everything else.
+   *
+   * After, because Noto Color Emoji also carries plain 0-9, # and *
+   * -- the bases of keycap sequences -- and anything listed ahead of
+   * the text face would draw every digit on the screen. The text
+   * face has those, so it wins them.
+   *
+   * Before system-ui and sans-serif, because on the Pi those are
+   * DejaVu Sans, which has its own monochrome star and would
+   * otherwise be chosen for it: the browser takes the first font
+   * that has the character, not the best one. */
+  --font-display:
+    'Saira Semi Condensed', 'Noto Color Emoji', system-ui, sans-serif;
+  --font-body:
+    'Barlow', 'Noto Color Emoji', system-ui, -apple-system, sans-serif;
   --radius: 20px;
   --radius-sm: 12px;
 

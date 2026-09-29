@@ -14,6 +14,33 @@
     load as loadSettings,
     themeAttr,
   } from '$lib/settings.svelte'
+  /* The two families, from Fontsource.
+   *
+   * Per-subset imports rather than the plain weight files: 400.css
+   * brings latin, latin-ext and Vietnamese together, and all three
+   * would land in the build. latin-400.css is the one face -- and
+   * latin carries a with ring, a and o with diaeresis, so Swedish
+   * needs nothing more.
+   *
+   * Only the weights in use. A missing one is not faked by the
+   * browser but swapped for the nearest, so 400 is here for the
+   * keypad entry and 700 for <strong>, neither of which ask for it
+   * by name. */
+  import '@fontsource/barlow/latin-400.css'
+  import '@fontsource/barlow/latin-600.css'
+  import '@fontsource/barlow/latin-700.css'
+  import '@fontsource/saira-semi-condensed/latin-400.css'
+  import '@fontsource/saira-semi-condensed/latin-600.css'
+  import '@fontsource/saira-semi-condensed/latin-700.css'
+  /* Colour emoji, bundled so it does not depend on what the Pi has
+     installed. The package default rather than emoji-400.css: the
+     default splits the font into eleven chunks by unicode-range, so
+     the browser fetches only the ones holding emoji on the screen --
+     a few hundred kilobytes rather than the 5.8 MB single file.
+
+     Its order in the font stacks is what keeps it off the digits;
+     see app.css. */
+  import '@fontsource/noto-color-emoji'
   import '../app.css'
 
   interface Props {

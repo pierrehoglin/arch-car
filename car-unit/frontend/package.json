@@ -40,5 +40,10 @@
     "workerDirectory": [
       "static"
     ]
+  },
+  "dependencies": {
+    "@fontsource/barlow": "^5.3.0",
+    "@fontsource/noto-color-emoji": "^5.3.2",
+    "@fontsource/saira-semi-condensed": "^5.3.0"
   }
 }
