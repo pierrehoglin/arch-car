@@ -125,9 +125,11 @@ async def fm_remove_preset(frequency: float) -> list[dict]:
 async def fm_scan(threshold: float | None = None,
                   integration: int | None = None,
                   identify: bool = False,
-                  resume: bool = True) -> list[dict]:
+                  resume: bool = True,
+                  report=None) -> list[dict]:
     kwargs: dict[str, Any] = {'identify_stations': identify,
-                              'resume': resume}
+                              'resume': resume,
+                              'report': report}
     if threshold is not None:
         kwargs['threshold'] = threshold
     if integration is not None:

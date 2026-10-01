@@ -22,9 +22,6 @@ import { stream } from './stream'
  * a pending state.
  */
 
-/** A sweep, plus a few seconds per station to read each name. */
-const SCAN_MS = 4200
-
 /** Enough to see a spinner, not enough to be tiresome. */
 const NORMAL_MS = 120
 
@@ -503,8 +500,7 @@ export const handlers = [
 
   http.post('/api/fm/scan', async ({ request }) => {
     const { identify = true } = await body<{ identify?: boolean }>(request)
-    await wait(SCAN_MS)
-    return HttpResponse.json(device.runScan(identify))
+    return HttpResponse.json(await device.runScan(identify))
   }),
 ]
 

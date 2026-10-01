@@ -29,6 +29,7 @@ const KNOWN = [
   'fm',
   'presets',
   'signals',
+  'scan',
   'audio',
   'source',
   'bluetooth',

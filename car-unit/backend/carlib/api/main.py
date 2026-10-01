@@ -640,9 +640,22 @@ async def get_fm_signals() -> list[dict]:
 
 @api.post('/fm/scan')
 async def post_fm_scan(body: ScanBody | None = None) -> list[dict]:
+    """
+    Sweep, and identify if asked. Answers when it has finished.
+
+    Progress goes out as `scan` events while it runs, so a screen can
+    show stations as they are found and named. The last one stays in
+    the replay cache, which is how a screen opened mid-scan picks it
+    up -- and why `signals` is published at the end too, for screens
+    that only want the result.
+    """
     body = body or ScanBody()
-    return await routes.fm_scan(body.threshold, body.integration,
-                                body.identify, body.resume)
+    signals = await routes.fm_scan(
+        body.threshold, body.integration, body.identify, body.resume,
+        report=lambda progress: events.events.publish(
+            'scan', progress.to_dict()))
+    events.events.publish('signals', signals)
+    return signals
 
 
 @api.get('/source')

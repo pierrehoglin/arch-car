@@ -65,6 +65,33 @@
     found.filter((s) => s.rds_name || nameForPi(s.pi)).length,
   )
 
+  /* Seconds since the scan began, for the footer while it runs.
+     From the daemon's start time rather than from opening the dialog,
+     so a scan already under way shows how long it has really taken. */
+  let now = $state(Date.now() / 1000)
+
+  $effect(() => {
+    if (!radio.scanning) return
+    now = Date.now() / 1000
+    const timer = setInterval(() => (now = Date.now() / 1000), 1000)
+    return () => clearInterval(timer)
+  })
+
+  const progress = $derived(radio.progress)
+
+  const elapsed = $derived.by(() => {
+    const seconds = Math.max(0, Math.round(now - (progress?.started ?? now)))
+    return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+  })
+
+  /** Where one frequency is in the listening pass. */
+  function stepOf(index: number, frequency: number) {
+    if (!progress) return 'waiting'
+    if (index < progress.checked) return 'done'
+    if (progress.current === frequency) return 'listening'
+    return 'waiting'
+  }
+
   /** Signal strength as five steps, 0 to 30 dB over the noise floor. */
   const bars = (power: number) =>
     Math.min(5, Math.max(0, Math.round(power / 6)))
@@ -76,14 +103,93 @@
   title="Scan"
   dismissable={!radio.scanning}
 >
-  {#if radio.scanning}
+  {#if radio.scanning && progress?.phase === 'identifying'}
+    <!-- Every peak the sweep found, in the order they are listened
+         to. Up the band rather than strongest first, so the one being
+         listened to moves steadily down the list instead of jumping
+         about. -->
+    <div class="pass">
+      <div class="pass-head">
+        <span>Reading station names</span>
+        <span class="pass-count">
+          {progress.checked} of {progress.signals.length}
+        </span>
+      </div>
+      <div
+        class="bar"
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={progress.signals.length}
+        aria-valuenow={progress.checked}
+      >
+        <i style:width="{(progress.checked / progress.signals.length) * 100}%"
+        ></i>
+      </div>
+    </div>
+
+    <ul class="stations">
+      {#each progress.signals as station, index (station.frequency)}
+        {@const step = stepOf(index, station.frequency)}
+        {@const named = station.rds_name || nameForPi(station.pi)}
+        <li
+          class="station"
+          class:waiting={step === 'waiting'}
+          class:listening={step === 'listening'}
+        >
+          <span class="strength" aria-hidden="true">
+            {#each [1, 2, 3, 4, 5] as level (level)}
+              <i
+                class:lit={level <= bars(station.power)}
+                style:height="{2 + level * 2}px"
+              ></i>
+            {/each}
+          </span>
+
+          <span class="labels">
+            <span class="name">
+              {step === 'done' && named
+                ? named
+                : `${station.frequency.toFixed(1)} MHz`}
+            </span>
+            <span class="frequency" class:faint={step !== 'listening' && !(step === 'done' && named)}>
+              {#if step === 'listening'}
+                Listening for RDS
+              {:else if step === 'waiting'}
+                Waiting
+              {:else if named}
+                {station.frequency.toFixed(1)} MHz
+              {:else}
+                No RDS — probably noise
+              {/if}
+            </span>
+          </span>
+
+          <span class="state" aria-hidden="true">
+            {#if step === 'listening'}
+              <Spinner size={18} label="Listening" />
+            {:else if step === 'done' && named}
+              <Icon name="check" size={20} />
+            {/if}
+          </span>
+        </li>
+      {/each}
+    </ul>
+  {:else if radio.scanning}
     <div class="working">
       <Spinner label="Scanning" />
-      <p class="what">Sweeping the band</p>
-      <p class="detail">
-        Each station found is tuned in turn to read its name, so this
-        takes a few seconds. Playback resumes afterwards.
-      </p>
+      {#if progress?.phase === 'resuming'}
+        <p class="what">Resuming playback</p>
+        <p class="detail">
+          {progress.signals.length} found. Back to what was playing.
+        </p>
+      {:else}
+        <p class="what">Sweeping the band</p>
+        <p class="detail">
+          Measuring signal strength from 87.5 to 108 MHz. Each peak is
+          then tuned in turn to read its name, and playback resumes
+          afterwards.
+        </p>
+      {/if}
     </div>
   {:else if radio.error}
     <div class="working">
@@ -169,7 +275,9 @@
   {/if}
 
   {#snippet footer()}
-    {#if !radio.scanning}
+    {#if radio.scanning}
+      <span class="summary">Scanning · {elapsed}</span>
+    {:else}
       <span class="summary">
         {#if ordered.length}
           {ordered.length} found, {identified} named
@@ -274,6 +382,58 @@
 
   .frequency.faint {
     color: var(--text-faint);
+  }
+
+  .pass {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+    padding-bottom: var(--spacing-s);
+  }
+
+  .pass-head {
+    display: flex;
+    justify-content: space-between;
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .pass-count {
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .bar {
+    height: 4px;
+    overflow: hidden;
+    background: var(--chip);
+    border-radius: 2px;
+  }
+
+  .bar i {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width 0.3s ease;
+  }
+
+  /* Not yet listened to: there, but not the point yet. */
+  .station.waiting {
+    opacity: 0.45;
+  }
+
+  .station.listening .name {
+    color: var(--accent);
+  }
+
+  /* A fixed slot, so rows do not shift as the spinner moves down and
+     ticks appear. */
+  .state {
+    display: grid;
+    place-items: center;
+    width: 46px;
+    color: var(--accent);
   }
 
   .summary {

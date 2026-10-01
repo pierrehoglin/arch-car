@@ -2,7 +2,13 @@ import * as fm from './api/fm'
 import * as stored from './api/settings'
 import { RequestFailed } from './api/client'
 import { on, stream } from './api/stream.svelte'
-import { EMPTY_RADIO, type RadioState, type Signal, type Station } from './api/types'
+import {
+  EMPTY_RADIO,
+  type RadioState,
+  type ScanProgress,
+  type Signal,
+  type Station,
+} from './api/types'
 
 /* The radio, as one piece of state the screens share.
  *
@@ -63,6 +69,8 @@ interface Store {
   /** What the last scan found. Empty until one has run. */
   signals: Signal[]
   scanning: boolean
+  /** The scan in progress, step by step. Null until one has run. */
+  progress: ScanProgress | null
   busy: boolean
   /** Where the dial is heading while a retune is in flight.
    *
@@ -87,6 +95,13 @@ interface Store {
  */
 let scanning = false
 
+/* Whether the daemon says a scan is running -- possibly one this
+   screen did not start, from before a reload or from the CLI. Plain
+   for the same reason as `scanning`. */
+let running = false
+
+const ACTIVE: ScanProgress['phase'][] = ['sweeping', 'identifying', 'resuming']
+
 export const radio = $state<Store>({
   state: EMPTY_RADIO,
   settings: { ...DEFAULT_SETTINGS },
@@ -94,6 +109,7 @@ export const radio = $state<Store>({
   presets: [],
   signals: [],
   scanning: false,
+  progress: null,
   busy: false,
   pending: null,
   error: '',
@@ -262,18 +278,33 @@ export async function setSetting<K extends keyof RadioSettings>(
  * device, so a second would fail on a busy dongle rather than queue.
  */
 export async function scan(identify = true): Promise<void> {
-  if (scanning) return
+  /* Also when one is running that this screen did not start: asking
+     again would only be refused, and its progress is already coming
+     in over the stream. */
+  if (scanning || running) return
 
   scanning = true
   radio.scanning = true
   radio.error = ''
+  /* Shown straight away, before the first event. Otherwise the last
+     scan's finished list would sit there until the daemon reports. */
+  radio.progress = {
+    phase: 'sweeping',
+    signals: [],
+    checked: 0,
+    current: null,
+    started: Date.now() / 1000,
+    error: '',
+  }
   try {
     radio.signals = await fm.scan(identify)
   } catch (cause) {
     report(cause)
   } finally {
     scanning = false
-    radio.scanning = false
+    /* Still on if the daemon is: a request that timed out has not
+       stopped the scan, and its events are still arriving. */
+    radio.scanning = running
   }
 }
 
@@ -306,6 +337,15 @@ export function watch(): () => void {
     }),
     on('signals', (data) => {
       radio.signals = data as Signal[]
+    }),
+    on('scan', (data) => {
+      const progress = data as ScanProgress
+      running = ACTIVE.includes(progress.phase)
+      radio.progress = progress
+      /* Covers a scan this screen did not start. One it did start is
+         already flagged, and stays so until its request returns. */
+      radio.scanning = running || scanning
+      if (progress.phase === 'done') radio.signals = progress.signals
     }),
   ]
 

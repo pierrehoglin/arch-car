@@ -1,4 +1,5 @@
 import type {
+  ScanProgress,
   AudioDevice,
   RadioState,
   Signal,
@@ -216,16 +217,67 @@ export function forgetPreset(frequency: number): Station[] {
   return presets
 }
 
-export function runScan(identify: boolean): Signal[] {
-  scanned = BROADCASTS.map((b) => ({
-    frequency: b.frequency,
-    power: b.power,
-    name: b.name,
-    /* Without identify a sweep finds peaks but cannot name them:
-       reading a name means tuning each one in turn. */
-    rds_name: identify ? b.name : '',
-    pi: identify ? b.pi : '',
-  }))
+const pauseFor = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+/* The last scan's progress, replayed to a stream that connects
+   mid-scan as the daemon's cache does. */
+let scanProgress: ScanProgress | null = null
+export const currentScan = () => scanProgress
+
+function tellScan(progress: ScanProgress): void {
+  scanProgress = {
+    ...progress,
+    signals: progress.signals.map((s) => ({ ...s })),
+  }
+  emit('scan', scanProgress)
+}
+
+/**
+ * A scan, step by step, at roughly the daemon's pace: a few seconds
+ * of sweep, then each peak listened to in turn. Shortened -- the
+ * real thing is up to five seconds a station -- but slow enough to
+ * watch the list fill in.
+ */
+export async function runScan(identify: boolean): Promise<Signal[]> {
+  const started = Date.now() / 1000
+  let progress: ScanProgress = {
+    phase: 'sweeping', signals: [], checked: 0, current: null,
+    started, error: '',
+  }
+  tellScan(progress)
+  await pauseFor(2500)
+
+  /* Without identify a sweep finds peaks but cannot name them:
+     reading a name means tuning each one in turn. */
+  const found: Signal[] = [...BROADCASTS]
+    .sort((a, b) => a.frequency - b.frequency)
+    .map((b) => ({
+      frequency: b.frequency, power: b.power, name: '', rds_name: '', pi: '',
+    }))
+
+  if (identify) {
+    progress = { ...progress, phase: 'identifying', signals: found }
+    tellScan(progress)
+
+    for (const [index, signal] of found.entries()) {
+      tellScan({ ...progress, current: signal.frequency })
+      await pauseFor(900)
+
+      const broadcast = BROADCASTS.find((b) => b.frequency === signal.frequency)
+      signal.rds_name = broadcast?.name ?? ''
+      signal.name = broadcast?.name ?? ''
+      signal.pi = broadcast?.pi ?? ''
+      progress = { ...progress, checked: index + 1, current: null }
+      tellScan(progress)
+    }
+  }
+
+  scanned = found
+  if (radio.playing) {
+    tellScan({ ...progress, phase: 'resuming', signals: found })
+    await pauseFor(800)
+  }
+  tellScan({ ...progress, phase: 'done', signals: found, current: null })
   emit('signals', scanned)
   return scanned
 }

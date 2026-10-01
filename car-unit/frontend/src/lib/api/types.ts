@@ -61,6 +61,20 @@ export interface Signal {
   pi: string
 }
 
+/** Where a scan has got to. Published as `scan` events while it runs.
+ *
+ *  `signals` is in scan order, up the band. The first `checked` have
+ *  been listened to; `current` is the one being listened to now. */
+export interface ScanProgress {
+  phase: 'sweeping' | 'identifying' | 'resuming' | 'done' | 'failed'
+  signals: Signal[]
+  checked: number
+  current: number | null
+  /** Unix seconds, so a screen opened mid-scan can count from it. */
+  started: number
+  error: string
+}
+
 export interface Station {
   frequency: number
   name: string

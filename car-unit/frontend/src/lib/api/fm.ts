@@ -9,8 +9,11 @@ import type { RadioState, Signal, Station } from './types'
  */
 
 /** Scanning sweeps the whole band, and identifying tunes each peak in
- *  turn to read its RDS name -- a few seconds per station. */
-const SCAN_TIMEOUT = 120_000
+ *  turn to read its RDS name -- up to five seconds per station, and a
+ *  busy band has twenty or more. Generous, because the answer also
+ *  arrives as a `scan` event: a request that gave up early would
+ *  report a failure for a scan that went on to finish. */
+const SCAN_TIMEOUT = 300_000
 
 export const status = () => request<RadioState>('/fm')
 

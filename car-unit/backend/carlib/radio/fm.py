@@ -1237,6 +1237,45 @@ def save_scan(signals: list[Signal]) -> None:
     })
 
 
+@dataclass
+class ScanProgress:
+    """
+    Where a scan has got to, reported as it goes.
+
+    A full scan is a sweep of the band followed by tuning each peak to
+    read its RDS -- half a minute or more on a busy band, with the
+    radio silent throughout. This is what lets a screen show the
+    stations turning up rather than a spinner for all of it.
+
+    `signals` is the scan order, which is up the band. The first
+    `checked` of them have been listened to; `current` is the one
+    being listened to now.
+    """
+
+    # sweeping -> identifying -> resuming -> done, or failed from any.
+    # identifying and resuming are skipped when they do not apply.
+    phase: str = 'sweeping'
+    signals: list[Signal] = field(default_factory=list)
+    checked: int = 0
+    current: float | None = None
+    # Wall-clock start, so a screen can count up from it -- including
+    # one that connected halfway through.
+    started: float = field(default_factory=time.time)
+    error: str = ''
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @property
+    def active(self) -> bool:
+        return self.phase in ('sweeping', 'identifying', 'resuming')
+
+
+# One scan at a time: it holds the only dongle, and a second sweep
+# would fail on a busy device halfway through the first.
+_scan_lock = asyncio.Lock()
+
+
 async def scan(threshold: float = SCAN_THRESHOLD_DB,
                integration: int = SCAN_INTEGRATION,
                device: int = 0,
@@ -1244,7 +1283,8 @@ async def scan(threshold: float = SCAN_THRESHOLD_DB,
                resume: bool = True,
                identify_stations: bool = False,
                identify_seconds: float = IDENTIFY_SECONDS,
-               progress=None) -> list[Signal]:
+               progress=None,
+               report=None) -> list[Signal]:
     """
     Sweep the FM band for stations.
 
@@ -1259,7 +1299,40 @@ async def scan(threshold: float = SCAN_THRESHOLD_DB,
 
     `progress` is called with (index, total, Signal) before each
     identification, so a CLI can say what it is doing.
+
+    `report` is called with a ScanProgress at every step, for anything
+    that wants the whole picture -- the daemon publishes it as an
+    event. It must not block: the scan waits on it.
     """
+    if _scan_lock.locked():
+        raise NotAvailableError(
+            'a scan is already running',
+            hint='wait for it to finish; it holds the tuner')
+
+    async with _scan_lock:
+        state_ = ScanProgress()
+
+        def tell(**changes) -> None:
+            for key, value in changes.items():
+                setattr(state_, key, value)
+            if report:
+                report(state_)
+
+        tell()
+        try:
+            return await _scan(state_, tell, threshold, integration,
+                               device, gain, resume, identify_stations,
+                               identify_seconds, progress)
+        except Exception as exc:
+            tell(phase='failed', current=None,
+                 error=str(exc).splitlines()[0] if str(exc) else
+                 type(exc).__name__)
+            raise
+
+
+async def _scan(state_: ScanProgress, tell, threshold, integration,
+                device, gain, resume, identify_stations,
+                identify_seconds, progress) -> list[Signal]:
     previous = await status()
 
     if previous.playing:
@@ -1294,31 +1367,39 @@ async def scan(threshold: float = SCAN_THRESHOLD_DB,
 
     # Carry preset names through so a scan list reads like a station
     # list rather than a column of numbers.
-    for signal in signals:
-        preset = find_preset(signal.frequency)
+    for found in signals:
+        preset = find_preset(found.frequency)
         if preset:
-            signal.name = preset.name
+            found.name = preset.name
 
-    if identify_stations:
-        for index, signal in enumerate(signals):
+    if identify_stations and signals:
+        tell(phase='identifying', signals=signals)
+
+        for index, found in enumerate(signals):
             if progress:
-                progress(index, len(signals), signal)
+                progress(index, len(signals), found)
+            tell(current=found.frequency)
             try:
-                rds = await identify(signal.frequency,
+                rds = await identify(found.frequency,
                                      seconds=identify_seconds,
                                      gain=gain, device=device)
             except NotAvailableError:
                 break       # redsea missing; leave the rest unnamed
-            signal.rds_name = rds.ps
-            signal.pi = rds.pi
-            if rds.ps and not signal.name:
-                signal.name = rds.ps
+            found.rds_name = rds.ps
+            found.pi = rds.pi
+            if rds.ps and not found.name:
+                found.name = rds.ps
+            tell(checked=index + 1, current=None)
+    else:
+        tell(signals=signals)
 
     save_scan(signals)
 
     if resume and previous.playing and previous.frequency is not None:
+        tell(phase='resuming', current=None)
         await play(previous.frequency, gain=previous.gain)
 
+    tell(phase='done', current=None)
     return signals
 
 
