@@ -28,6 +28,15 @@ export const toggle = () =>
 
 export const stop = () => request<RadioState>('/fm/stop', { method: 'POST' })
 
+/**
+ * Start the station again with the stored gain and RDS setting.
+ *
+ * Both are arguments to the receiver, so a change only reaches a
+ * running radio this way. Does nothing while the radio is off.
+ */
+export const restart = () =>
+  request<RadioState>('/fm/restart', { method: 'POST' })
+
 /** Step the frequency. The backend clamps to the band. */
 export const tune = (offset: number) =>
   request<RadioState>('/fm/tune', { method: 'POST', body: { offset } })

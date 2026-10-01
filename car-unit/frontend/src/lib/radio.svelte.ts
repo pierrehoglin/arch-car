@@ -1,4 +1,5 @@
 import * as fm from './api/fm'
+import * as stored from './api/settings'
 import { RequestFailed } from './api/client'
 import { on, stream } from './api/stream.svelte'
 import { EMPTY_RADIO, type RadioState, type Signal, type Station } from './api/types'
@@ -17,8 +18,47 @@ import { EMPTY_RADIO, type RadioState, type Signal, type Station } from './api/t
  * reports promptly -- and most polls would find nothing changed.
  */
 
+/** How the radio receives. Stored by the daemon under `fm.*`. */
+export interface RadioSettings {
+  /** Turn the radio on when the daemon starts. */
+  autostart: boolean
+  /** Tuner gain in dB. */
+  gain: number
+  /** Decode RDS: names, radio text, traffic flags. */
+  rds: boolean
+  /** Let traffic announcements interrupt other sources. */
+  traffic: boolean
+}
+
+/* The daemon's defaults, from its settings catalogue. Shown until the
+   stored values arrive, and kept for any key never written. */
+const DEFAULT_SETTINGS: RadioSettings = {
+  autostart: false,
+  gain: 40,
+  rds: true,
+  traffic: true,
+}
+
+const SETTING_KEYS: Record<keyof RadioSettings, string> = {
+  autostart: 'fm.autostart',
+  gain: 'fm.gain',
+  rds: 'fm.rds',
+  traffic: 'fm.traffic',
+}
+
+/** The receiver needs restarting for these to reach it. */
+const RESTARTS: (keyof RadioSettings)[] = ['gain', 'rds']
+
+/** The range rtl_fm accepts. The R828D tops out at 49.6 dB and the
+ *  driver picks the nearest step it has, so whole numbers are fine. */
+export const GAIN_MIN = 0
+export const GAIN_MAX = 50
+
 interface Store {
   state: RadioState
+  settings: RadioSettings
+  /** A changed setting is being applied by restarting the receiver. */
+  applying: boolean
   presets: Station[]
   /** What the last scan found. Empty until one has run. */
   signals: Signal[]
@@ -49,6 +89,8 @@ let scanning = false
 
 export const radio = $state<Store>({
   state: EMPTY_RADIO,
+  settings: { ...DEFAULT_SETTINGS },
+  applying: false,
   presets: [],
   signals: [],
   scanning: false,
@@ -155,6 +197,61 @@ export async function forgetPreset(frequency: number): Promise<void> {
     radio.presets = await fm.forgetPreset(frequency)
   } catch (cause) {
     report(cause)
+  }
+}
+
+/** Read the stored radio settings. Anything missing or of the wrong
+ *  type keeps its default rather than putting a bad value on screen. */
+export async function loadSettings(): Promise<void> {
+  try {
+    const all = await stored.all()
+    const read = <K extends keyof RadioSettings>(key: K) => {
+      const value = stored.valueAt(all, SETTING_KEYS[key])
+      return typeof value === typeof DEFAULT_SETTINGS[key]
+        ? (value as RadioSettings[K])
+        : DEFAULT_SETTINGS[key]
+    }
+    radio.settings = {
+      autostart: read('autostart'),
+      gain: read('gain'),
+      rds: read('rds'),
+      traffic: read('traffic'),
+    }
+  } catch (cause) {
+    report(cause)
+  }
+}
+
+/**
+ * Change one setting, and apply it if the radio is on.
+ *
+ * Written first and applied second: the restart reads the setting
+ * from disk, so applying before the write lands would restart with
+ * the old value. Reverted on screen if the write fails, so the switch
+ * never shows something the daemon does not have.
+ */
+export async function setSetting<K extends keyof RadioSettings>(
+  key: K,
+  value: RadioSettings[K],
+): Promise<void> {
+  const previous = radio.settings[key]
+  radio.settings[key] = value
+
+  try {
+    await stored.update({ [SETTING_KEYS[key]]: value })
+  } catch (cause) {
+    radio.settings[key] = previous
+    report(cause)
+    return
+  }
+
+  if (!RESTARTS.includes(key) || !radio.state.playing) return
+
+  radio.applying = true
+  try {
+    await act(fm.restart)
+  } finally {
+    radio.applying = false
   }
 }
 

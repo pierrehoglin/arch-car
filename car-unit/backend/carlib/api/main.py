@@ -407,8 +407,10 @@ async def handle_error(request: Request, exc: CarError) -> JSONResponse:
 
 class PlayBody(BaseModel):
     station: str | None = None
+    # None means "use the setting" for both. Explicit values are for
+    # the CLI's --gain and --no-rds, and last for that one tune.
     gain: float | None = None
-    rds: bool = True
+    rds: bool | None = None
 
 
 class TuneBody(BaseModel):
@@ -542,6 +544,12 @@ async def get_fm() -> dict:
 async def post_fm_play(body: PlayBody | None = None) -> dict:
     body = body or PlayBody()
     return await routes.fm_play(body.station, body.gain, body.rds)
+
+
+@api.post('/fm/restart')
+async def post_fm_restart() -> dict:
+    """Apply changed radio settings to a station already playing."""
+    return await routes.fm_restart()
 
 
 @api.post('/fm/pause')

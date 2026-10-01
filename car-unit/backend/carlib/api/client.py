@@ -180,7 +180,7 @@ class _Fm:
     async def status(self) -> RadioState:
         return from_dict(RadioState, await request('GET', '/fm'))
 
-    async def play(self, station=None, gain=None, rds=True,
+    async def play(self, station=None, gain=None, rds=None,
                    **_ignored) -> RadioState:
         body = {'station': None if station is None else str(station),
                 'gain': gain, 'rds': rds}

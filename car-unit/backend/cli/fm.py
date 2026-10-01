@@ -95,7 +95,7 @@ async def cmd_status(args) -> None:
 async def cmd_play(args) -> None:
     state = await fm.play(args.station, gain=args.gain,
                           device=args.device, squelch=args.squelch,
-                          rds=not args.no_rds)
+                          rds=False if args.no_rds else None)
     emit_json(state) if args.json else show(state)
 
 

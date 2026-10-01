@@ -856,6 +856,10 @@ export function wifiForget(ssid: string) {
 const SETTING_DEFAULTS: Record<string, unknown> = {
   'ui.theme': 'night',
   'ui.ambient': '#d8b146',
+  'fm.autostart': false,
+  'fm.gain': 40,
+  'fm.rds': true,
+  'fm.traffic': true,
 }
 
 let settings: Record<string, unknown> = { ...SETTING_DEFAULTS }

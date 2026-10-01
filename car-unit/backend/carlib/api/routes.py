@@ -69,8 +69,12 @@ async def fm_status() -> dict:
 
 async def fm_play(station: str | None = None,
                   gain: float | None = None,
-                  rds: bool = True) -> dict:
+                  rds: bool | None = None) -> dict:
     return (await fm.play(station, gain=gain, rds=rds)).to_dict()
+
+
+async def fm_restart() -> dict:
+    return (await fm.restart()).to_dict()
 
 
 async def fm_pause() -> dict:

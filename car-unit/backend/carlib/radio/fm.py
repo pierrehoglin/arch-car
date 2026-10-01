@@ -641,14 +641,6 @@ def _last_frequency() -> float | None:
     station = load_last()
     return station.frequency if station else None
 
-def last_gain() -> float:
-    data = _settings.get_dict('last', {})
-    try:
-        return float(data.get('gain', DEFAULT_GAIN))
-    except (TypeError, ValueError):
-        return DEFAULT_GAIN
-
-
 # --- Process state ---------------------------------------------------------
 
 def _read_state() -> dict:
@@ -909,7 +901,7 @@ async def play(station: Station | float | str | None = None,
                gain: float | None = None,
                device: int = 0,
                squelch: int = 0,
-               rds: bool = True,
+               rds: bool | None = None,
                retry: bool = True) -> RadioState:
     """
     Start or resume playback.
@@ -967,8 +959,6 @@ async def play(station: Station | float | str | None = None,
             raise NotFoundError(
                 'station', 'last played',
                 ['nothing played yet -- give a frequency, or run scan'])
-        if gain is None:
-            gain = last_gain()
     elif isinstance(station, Station):
         target = station
     elif isinstance(station, (int, float)):
@@ -977,8 +967,14 @@ async def play(station: Station | float | str | None = None,
     else:
         target = resolve_station(station)
 
+    # Gain and RDS come from settings unless the caller says otherwise.
+    # Not from the last pipeline: the settings screen is where they are
+    # changed, and a value carried over from before the change would
+    # quietly undo it on the next tune.
     if gain is None:
         gain = default_gain()
+    if rds is None:
+        rds = default_rds()
 
     previous = _read_state().get('pid')
     await stop()
@@ -1433,9 +1429,7 @@ async def seek(direction: int = 1,
         lower = [f for f in frequencies if f < here - 0.05]
         nxt = lower[-1] if lower else frequencies[-1]
 
-    data = _read_state()
-    return await play(nxt, gain=current.gain,
-                      rds=data.get('rds_enabled', True))
+    return await play(nxt)
 
 
 async def tune(offset: float) -> RadioState:
@@ -1443,16 +1437,13 @@ async def tune(offset: float) -> RadioState:
     Step the frequency without restarting from scratch.
 
     Nothing about rtl_fm supports retuning a running process, so this
-    is stop-and-start -- but it keeps the gain and device settings.
+    is stop-and-start, with gain and RDS taken from settings.
     """
     current = await status()
     if not current.playing or current.frequency is None:
         raise NotAvailableError('nothing is playing')
 
-    frequency = parse_frequency(current.frequency + offset)
-    data = _read_state()
-    return await play(frequency, gain=current.gain,
-                      rds=data.get('rds_enabled', True))
+    return await play(parse_frequency(current.frequency + offset))
 
 
 async def next_preset(step: int = 1) -> RadioState:
@@ -1471,10 +1462,30 @@ async def next_preset(step: int = 1) -> RadioState:
             index = i
             break
 
-    data = _read_state()
-    return await play(presets[(index + step) % len(presets)],
-                      gain=current.gain,
-                      rds=data.get('rds_enabled', True))
+    return await play(presets[(index + step) % len(presets)])
+
+
+async def restart() -> RadioState:
+    """
+    Restart the pipeline on the same station, to apply new settings.
+
+    Gain and RDS are arguments to rtl_fm, so a change to either only
+    reaches a running radio by starting it again. A paused radio stays
+    paused: the change is to how it receives, not whether it plays.
+
+    Does nothing when the radio is off -- the settings are read when
+    it next starts anyway.
+    """
+    current = await status()
+    if not current.playing or current.frequency is None:
+        return current
+
+    await stop()
+    state = await play(Station(frequency=current.frequency,
+                               name=current.name))
+    if current.paused:
+        state = await _set_muted(True)
+    return state
 
 
 # --- Muting ----------------------------------------------------------------

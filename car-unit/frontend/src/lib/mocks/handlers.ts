@@ -445,6 +445,13 @@ export const handlers = [
     return HttpResponse.json(device.setPaused(!device.state().paused))
   }),
 
+  /* Slow on purpose: the daemon stops and starts the whole
+     pipeline, and the screen has to show something meanwhile. */
+  http.post('/api/fm/restart', async () => {
+    await wait(1500)
+    return HttpResponse.json(device.state())
+  }),
+
   http.post('/api/fm/stop', async () => {
     await wait(NORMAL_MS)
     return HttpResponse.json(device.stop())
