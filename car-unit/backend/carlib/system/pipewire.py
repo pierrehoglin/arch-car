@@ -13,7 +13,7 @@ when an operation fails -- which is what a stale id looks like.
 Streams are found by their PipeWire properties. Tag a stream at
 launch and it can be found again:
 
-    pw-play -P '{ node.name = "carlib-fm" }' ...
+    pacat --client-name=carlib-fm --property=node.name=carlib-fm ...
 
 Requires pipewire and wireplumber, both already needed for audio.
 """
@@ -200,9 +200,9 @@ def match(candidates: list[Node], *,
     Every supplied term is tried against every field, because which
     property carries the tag depends on how the stream was created.
 
-    Deliberately exact: with pw-play setting node.name explicitly
-    there is nothing to be lenient about, and a substring match could
-    grab the wrong stream.
+    Deliberately exact: the radio sets its tag explicitly, so there
+    is nothing to be lenient about, and a substring match could grab
+    the wrong stream.
     """
     terms = [t for t in (application, name, binary) if t]
     if not terms:

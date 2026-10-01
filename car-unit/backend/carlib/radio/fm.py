@@ -13,7 +13,7 @@ holding the USB device, which then blocks the next tune with a
 confusing "device busy".
 
 Requires:
-    pacman -S rtl-sdr sox
+    pacman -S rtl-sdr sox libpulse pipewire-pulse
 
 The RTL-SDR Blog V4 needs a recent librtlsdr -- older builds do not
 know the R828D tuner and either fail to open the device or tune to the
@@ -39,17 +39,21 @@ RTL_TEST = 'rtl_test'
 RTL_POWER = 'rtl_power'
 REDSEA = 'redsea'
 SOX = 'sox'
-PW_PLAY = 'pw-play'
+PACAT = 'pacat'
 
 # Tag the playback stream so it can be found on the PipeWire graph and
 # muted independently. Node ids are assigned at runtime and change
-# constantly, so the tag is the only stable handle.
-#
-# pw-play is preferred over sox's `play` because it is PipeWire-native
-# and honours --media-name. sox typically links against ALSA, in which
-# case PULSE_PROP never reaches the graph and the stream shows up as a
-# generic "SoX" -- which would collide with any other sox process.
+# constantly, so the tag is the only stable handle. It is set as both
+# the client name (application.name) and node.name; pipewire.match
+# accepts either.
 STREAM_TAG = 'carlib-fm'
+
+# How much audio the player holds before it starts, and refills to
+# after running dry. The pipeline delivers in bursts -- sox writes
+# blocks of roughly 85 ms -- so the player needs a reserve to play
+# out of while the next one is on its way. Delay only matters when
+# tuning, which already takes over a second.
+PLAYBACK_BUFFER_MS = 200
 
 # FM broadcast band. Japan and a few other places differ, but this is
 # the ITU Region 1 allocation.
@@ -731,21 +735,37 @@ def player_command() -> str:
     """
     The command that puts audio on the graph.
 
-    pw-play rather than sox's `play` because -P sets node properties
-    directly, which is the only reliable way to find the stream again
-    and mute it. sox typically links against ALSA, in which case
-    PULSE_PROP never reaches PipeWire and the stream appears as a
-    generic "SoX" -- indistinguishable from any other sox process.
-    """
-    if not shutil.which(PW_PLAY):
-        raise NotAvailableError(
-            'pw-play not found',
-            hint='pacman -S pipewire')
+    pacat rather than pw-play. pw-play reads its input inside
+    PipeWire's realtime cycle and blocks there until a whole quantum
+    has arrived, so with a pipe that delivers in bursts the cycle runs
+    late and the stream underruns -- clean audio with gaps, worse on a
+    machine where some other client has shrunk the quantum. pw-top
+    shows it as a climbing ERR count and B/Q of +++ on the stream.
+    Raising --latency does not help; it only makes each blocking read
+    larger.
 
-    props = (f'{{ node.name = "{STREAM_TAG}" '
-             f'application.name = "{STREAM_TAG}" }}')
-    return (f"{PW_PLAY} -P '{props}' "
-            f'--rate {AUDIO_RATE} --channels 1 --format s16 --raw -')
+    pacat reads the pipe from its own main loop, outside the realtime
+    path, into a server-side buffer that is filled before playback
+    starts and refilled after an underrun. That buffer is the reserve
+    a bursty producer needs. It talks to pipewire-pulse, which is
+    already running wherever pactl works.
+
+    Not sox's `play`: that typically links against ALSA, so the
+    stream appears as a generic "SoX" that cannot be told apart from
+    any other sox process.
+    """
+    if not shutil.which(PACAT):
+        raise NotAvailableError(
+            'pacat not found',
+            hint='pacman -S libpulse pipewire-pulse')
+
+    return (
+        f'{PACAT} --playback --raw --format=s16le '
+        f'--rate={AUDIO_RATE} --channels=1 '
+        f'--latency-msec={PLAYBACK_BUFFER_MS} '
+        f'--client-name={STREAM_TAG} --stream-name={STREAM_TAG} '
+        f'--property=node.name={STREAM_TAG}'
+    )
 
 
 def build_command(frequency: float, gain: float = DEFAULT_GAIN,
