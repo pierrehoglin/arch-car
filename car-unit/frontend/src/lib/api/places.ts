@@ -28,6 +28,21 @@ export const saved = () => request<Place[]>('/places')
  *  the first GPS fix. */
 export const current = () => request<Place | null>('/places/current')
 
+export interface NewPlace {
+  name: string
+  /** Omitted, the daemon saves where the car is now. */
+  latitude?: number
+  longitude?: number
+  address?: string
+  /** Look the address up. Off when one is given already. */
+  lookup?: boolean
+}
+
+/** Save a place, or move one: the name is the key. Answers with
+ *  every saved place. */
+export const save = (place: NewPlace) =>
+  request<Place[]>('/places', { method: 'POST', body: place })
+
 /** Remove a saved place. Answers with the places that are left. */
 export const forget = (name: string) =>
   request<Place[]>(`/places/${encodeURIComponent(name)}`, {

@@ -47,3 +47,17 @@ export const reset = (key: string) =>
     `/settings/${encodeURIComponent(key)}`,
     { method: 'DELETE' },
   )
+
+/** One setting as the daemon's catalogue describes it. */
+export interface CatalogueEntry {
+  key: string
+  kind: 'str' | 'int' | 'float' | 'bool' | 'list' | 'dict'
+  default: unknown
+  description: string
+  /** Null when not set -- `default` applies. */
+  value: unknown
+  set: boolean
+}
+
+/** Every setting that exists, set or not, with its default. */
+export const catalogue = () => request<CatalogueEntry[]>('/settings/catalogue')

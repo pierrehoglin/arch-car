@@ -35,7 +35,7 @@ from carlib.core import settings, state
 from carlib.core.errors import CarError, NotFoundError
 from carlib.api import events, routes
 from carlib.bluetooth.pairing import Pairing
-from carlib.location import geocoding
+from carlib.location import geocoding, places
 from carlib.navigation import tiles, download
 from carlib.radio import fm
 from carlib.system import audio, source
@@ -168,6 +168,58 @@ async def _run_geocoder() -> None:
         except Exception:
             log.exception('geocoder failed; restarting in 60s')
             await asyncio.sleep(60)
+
+
+# How often the GPS is read to keep the last known position. Writes
+# are rarer -- places.remember() decides -- so this only sets how soon
+# a stop is noticed.
+REMEMBER_POLL = 15.0
+
+
+async def _remember_position() -> None:
+    """
+    Keep the last GPS fix in the settings file.
+
+    So that after a power cut there is a position straight away rather
+    than none until the GPS has found its satellites again. Separate
+    from the geocoder because that one is off by default, and this
+    needs no network.
+
+    Skipped while the position is pinned: there is nothing to remember
+    that the pin does not already say.
+    """
+    from carlib.location import gps
+
+    while True:
+        await asyncio.sleep(REMEMBER_POLL)
+
+        if settings.get('location.latitude') is not None:
+            continue
+
+        try:
+            fix = await gps.get()
+        except Exception:
+            continue
+
+        if (not fix.has_fix or fix.latitude is None
+                or fix.longitude is None):
+            continue
+
+        # The geocoder's address, when it was looked up close by. A
+        # remembered position with a name reads better after a restart
+        # than a pair of numbers.
+        address = ''
+        tracked = places.current()
+        if tracked is not None and tracked.address:
+            if places._metres(tracked.latitude, tracked.longitude,
+                              fix.latitude, fix.longitude) < 500:
+                address = tracked.address
+
+        try:
+            places.remember(fix.latitude, fix.longitude,
+                            fix.altitude, address)
+        except Exception:
+            log.exception('could not save the last known position')
 
 
 async def _watch_audio() -> None:
@@ -357,6 +409,8 @@ async def lifespan(app: FastAPI):
     _network_watch = asyncio.create_task(_watch_network())
     _fm_watch = asyncio.create_task(_watch_fm())
 
+    _position_memory = asyncio.create_task(_remember_position())
+
     # Map downloads report through the stream, so Settings > Map can
     # show progress -- and a screen opened halfway through picks it up
     # from the replay.
@@ -378,6 +432,8 @@ async def lifespan(app: FastAPI):
     # shutdown -- ending them first is what turns a stop that hangs
     # until systemd kills it into an immediate one.
     events.events.shutdown()
+
+    _position_memory.cancel()
 
     for task in (_autostart_task, _geocoder, _audio_watch,
                  _bluetooth_watch, _media_watch, _network_watch,

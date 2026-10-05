@@ -2,8 +2,8 @@
 """
 User settings.
 
-    settings                        # what has been set
-    settings show --all             # everything available, set or not
+    settings                        # every setting, defaults included
+    settings show --set             # only what has been changed
     settings describe fm.gain       # what one setting is for
     settings get fm.gain
     settings get fm.gain 40         # with a fallback
@@ -64,54 +64,95 @@ def render(value) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
+def _covered(key: str, stored: set[str]) -> bool:
+    """
+    Whether a declared key is already shown by what is stored.
+
+    Exactly, or through its children: fm.last is stored as a dict and
+    shown flattened -- fm.last.frequency, fm.last.gain -- so listing
+    fm.last again as a default would show the same thing twice.
+    """
+    return key in stored or any(s.startswith(key + '.') for s in stored)
+
+
+def rows_for(data: dict, only_set: bool) -> list[dict]:
+    """
+    One row per setting: what it is, and whether it was set.
+
+    Everything declared in the catalogue, with its default where it
+    has not been set -- so the list doubles as a reference to what can
+    be configured -- plus anything stored that the catalogue does not
+    know about, which still works and should still be visible.
+    """
+    stored = flatten(data)
+    stored_keys = {key for key, _ in stored}
+    rows = []
+
+    for key, value in stored:
+        entry = settings.known(key)
+        rows.append({
+            'key': key,
+            'value': value,
+            'set': True,
+            'default': entry.default if entry else None,
+            'kind': entry.kind if entry else '',
+            'description': entry.description if entry else '',
+        })
+
+    if not only_set:
+        for entry in settings.catalogue():
+            if _covered(entry.key, stored_keys):
+                continue
+            rows.append({
+                'key': entry.key,
+                'value': entry.default,
+                'set': False,
+                'default': entry.default,
+                'kind': entry.kind,
+                'description': entry.description,
+            })
+
+    rows.sort(key=lambda row: row['key'])
+    return rows
+
+
+def shown(value) -> str:
+    """A value for the table. Empty and missing are said out loud: a
+    blank column reads as a bug in the listing."""
+    if value is None:
+        return 'null'
+    if value == '':
+        return '""'
+    return render(value)
+
+
 async def cmd_show(args) -> None:
     data = settings.reload()
-    rows = flatten(data)
-
-    if args.all:
-        # Merge in everything declared but never set, so the catalogue
-        # is browsable without reading the source.
-        seen = {key for key, _ in rows}
-        for entry in settings.catalogue():
-            if entry.key not in seen:
-                rows.append((entry.key, None))
-        rows.sort()
+    rows = rows_for(data, only_set=args.set)
 
     if args.json:
-        if args.all:
-            emit_json([
-                {'key': k,
-                 'value': v,
-                 'set': v is not None or k in {r for r, _ in flatten(data)},
-                 'description': (settings.known(k).description
-                                 if settings.known(k) else '')}
-                for k, v in rows])
-        else:
-            emit_json(data)
+        emit_json(rows)
         return
 
     if not rows:
-        print('no settings')
-        print('list everything available with: settings show --all',
-              file=sys.stderr)
-        print(f'file: {settings.path()}', file=sys.stderr)
+        print('nothing set -- settings shows every setting with its '
+              'default', file=sys.stderr)
+        print(f'{settings.path()}', file=sys.stderr)
         return
 
-    width = max(len(key) for key, _ in rows)
-    configured = {key for key, _ in flatten(data)}
+    width = max(len(row['key']) for row in rows)
 
-    for key, value in rows:
-        if key in configured:
-            print(f'{key:<{width}}  {render(value)}')
-        else:
-            entry = settings.known(key)
-            shown = ('' if entry is None or entry.default in (None, '')
-                     else render(entry.default))
-            print(f'{key:<{width}}  {shown:<12} (default)')
+    for row in rows:
+        line = f"{row['key']:<{width}}  {shown(row['value'])}"
+        if not row['set']:
+            line += '  (default)'
+        print(line)
 
-    if not args.all:
-        print('\nsettings show --all lists everything available',
-              file=sys.stderr)
+    changed = sum(1 for row in rows if row['set'])
+    summary = (f'{changed} set' if args.set else
+               f'{changed} set, {len(rows) - changed} at their default')
+    print(f'\n{summary}. settings describe <key> says what one is for.',
+          file=sys.stderr)
     print(f'{settings.path()}', file=sys.stderr)
 
 
@@ -123,7 +164,7 @@ async def cmd_describe(args) -> None:
             emit_json(None)
             return
         print(f'{args.key} is not a known setting', file=sys.stderr)
-        print('settings show --all lists the ones that are',
+        print('settings lists the ones that are',
               file=sys.stderr)
         return
 
@@ -243,10 +284,15 @@ def main() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest='cmd')
 
-    p = sub.add_parser('show', parents=[common], help='show settings')
+    p = sub.add_parser('show', parents=[common],
+                       help='every setting, defaults included')
     p.set_defaults(fn=cmd_show)
+    p.add_argument('--set', action='store_true',
+                   help='only settings that have been changed')
+    # Kept so scripts that pass it still work. Listing everything is
+    # what show does now.
     p.add_argument('--all', action='store_true',
-                   help='include settings that exist but are unset')
+                   help=argparse.SUPPRESS)
 
     p = sub.add_parser('describe', parents=[common],
                        help='what a setting is for')
@@ -277,7 +323,8 @@ def main() -> int:
     p.set_defaults(fn=cmd_edit)
 
     args = parse_args(ap, 'show',
-                      defaults={'json': False, 'all': False})
+                      defaults={'json': False, 'all': False,
+                                'set': False})
     return run(args.fn(args))
 
 

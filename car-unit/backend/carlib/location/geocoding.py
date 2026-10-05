@@ -172,6 +172,10 @@ class Address:
     category: str = ''          # OSM class, e.g. "highway", "place"
     kind: str = ''              # OSM type, e.g. "residential"
     osm_id: str = ''
+    # node, way or relation. Tells apart results that share an
+    # address: the address point is a node, the building outline
+    # carrying the same address a way.
+    osm_type: str = ''
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -298,6 +302,7 @@ def parse_address(payload: dict) -> Address:
         category=str(payload.get('class', '')),
         kind=str(payload.get('type', '')),
         osm_id=str(payload.get('osm_id', '')),
+        osm_type=str(payload.get('osm_type', '')),
     )
 
 
@@ -507,6 +512,9 @@ def parse_photon(feature: dict) -> Address:
         category=text('osm_key'),
         kind=text('osm_value'),
         osm_id=text('osm_id'),
+        # Photon abbreviates: N, W, R.
+        osm_type={'N': 'node', 'W': 'way', 'R': 'relation'}.get(
+            text('osm_type').upper(), ''),
     )
 
     # Photon has no display_name, so build one. Without it a result

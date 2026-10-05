@@ -220,8 +220,43 @@ async def places_list() -> list[dict]:
 
 
 async def places_current() -> dict | None:
+    """
+    Where the car is, or None before the GPS has a fix.
+
+    The geocoder keeps a position with its address up to date as the
+    car moves -- but only while geocoding.auto is on. Without it there
+    is nothing recorded, so this falls back to reading the GPS, as
+    `places current` on the command line does, and looks the address
+    up once.
+
+    The lookup is a request someone asked for by opening a screen,
+    which the Nominatim policy permits, and reverse() caches to about
+    a city block -- so a screen opened again from the same spot does
+    not ask twice.
+    """
     place = places.current()
-    return place.to_dict() if place else None
+    if place is not None:
+        return {**place.to_dict(), 'last_known': False, 'at': None}
+
+    try:
+        place = await places.fix()
+    except NotAvailableError:
+        # No fix yet -- the first minutes after the ignition. Where the
+        # car was when it last had one, said as such: a parked car is
+        # usually still there, but the screen should not claim to know.
+        last = places.last_known()
+        if last is None:
+            return None
+        place, at = last
+        return {**place.to_dict(), 'last_known': True, 'at': at}
+
+    try:
+        found = await geocoding.reverse(place.latitude, place.longitude)
+        place.address = found.short
+    except Exception:
+        pass        # coordinates without an address are still an answer
+
+    return {**place.to_dict(), 'last_known': False, 'at': None}
 
 
 async def places_save(name: str, latitude: float | None = None,

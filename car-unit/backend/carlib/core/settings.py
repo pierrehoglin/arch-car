@@ -390,6 +390,11 @@ CATALOGUE: tuple[Known, ...] = (
           'instead of using GPS.', 'float'),
     Known('location.altitude', None, 'Altitude in metres for the '
           'pinned position.', 'float'),
+    Known('location.last', {}, 'Where the car last had a GPS fix, '
+          'written by the daemon about once a minute while it moves. '
+          'Used only until the GPS has a fix after a restart. Not a '
+          'pin: location.latitude and longitude are, and they make '
+          'the GPS ignored.', 'dict'),
 
     Known('geocoding.auto', False, 'Look up the current address as '
           'the car moves. Uses Nominatim, whose usage policy applies: '

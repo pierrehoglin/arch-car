@@ -140,6 +140,9 @@ export interface Address {
   category: string
   kind: string
   osm_id: string
+  /** node, way or relation -- an address point, an outline such as a
+   *  building, or a group of them. Empty when the service did not say. */
+  osm_type: string
 }
 
 /**
@@ -201,6 +204,11 @@ export interface Place {
   altitude: number | null
   /** Filled in by the geocoder when the place was saved. */
   address: string
+  /** Only on the current position: true when the GPS has no fix yet
+   *  and this is where the car last had one. */
+  last_known?: boolean
+  /** When a last known position was recorded, in Unix seconds. */
+  at?: number | null
 }
 
 /** Reserved: wherever we are now, kept current as the car moves. */

@@ -13,6 +13,8 @@ a place name and treat the current location as one more entry rather
 than special-casing None everywhere.
 """
 
+import math
+import time
 from dataclasses import dataclass, asdict
 
 from carlib.core import settings, state
@@ -30,6 +32,22 @@ CURRENT = 'current'
 HERE = 'here'
 
 RESERVED = (CURRENT, HERE)
+
+# Where the car last had a fix, kept in the settings file so it
+# survives a power cut. Not the same thing as location.latitude and
+# location.longitude: those pin the position and make the GPS ignored,
+# while this is only used until the GPS has a fix again.
+LAST = 'location.last'
+
+# How often the last position is written, at most. Once a minute while
+# moving is enough to come back within a minute's driving of where the
+# car stopped, and keeps writes to the SD card to about sixty an hour.
+REMEMBER_SECONDS = 60.0
+
+# And only if it has moved this far, so a parked car writes nothing.
+# Small enough that pulling into a space after the last write still
+# moves the remembered spot to where the car actually stopped.
+REMEMBER_METRES = 25.0
 
 
 @dataclass
@@ -201,13 +219,83 @@ async def here() -> Place:
     Where we are now, asking the GPS if need be.
 
     Prefers the position the geocoder already recorded, so the common
-    case costs nothing. Falls back to a fresh fix.
+    case costs nothing. Falls back to a fresh fix, and when the GPS has
+    none yet -- the first minutes after the ignition -- to where the
+    car last was. A parked car has not moved, so that is usually right,
+    and the weather for where the car was is better than none.
     """
     known = current()
     if known is not None:
         return known
 
-    return await fix()
+    try:
+        return await fix()
+    except NotAvailableError:
+        last = last_known()
+        if last is None:
+            raise
+        return last[0]
+
+
+# --- Last known position ----------------------------------------------------
+
+def _metres(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Great-circle distance. Here rather than borrowed from geocoding,
+    which imports this module."""
+    r = 6_371_000.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp, dl = p2 - p1, math.radians(lon2 - lon1)
+    a = (math.sin(dp / 2) ** 2
+         + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2)
+    return 2 * r * math.asin(math.sqrt(a))
+
+
+def last_known() -> tuple[Place, float] | None:
+    """Where the car last had a fix, and when (Unix seconds)."""
+    data = settings.get_dict(LAST, {})
+    try:
+        place = Place(
+            name=CURRENT,
+            latitude=float(data['latitude']),
+            longitude=float(data['longitude']),
+            altitude=(float(data['altitude'])
+                      if data.get('altitude') is not None else None),
+            address=str(data.get('address', '')),
+        )
+        return place, float(data.get('at', 0.0))
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def remember(latitude: float, longitude: float,
+             altitude: float | None = None,
+             address: str = '') -> bool:
+    """
+    Keep this fix as the last known position, if it is worth a write.
+
+    Throttled -- see REMEMBER_SECONDS and REMEMBER_METRES -- because
+    every write is the whole settings file to the SD card. Returns
+    whether it wrote.
+    """
+    previous = last_known()
+    now = time.time()
+
+    if previous is not None:
+        place, at = previous
+        if now - at < REMEMBER_SECONDS:
+            return False
+        if _metres(place.latitude, place.longitude,
+                   latitude, longitude) < REMEMBER_METRES:
+            return False
+
+    settings.set(LAST, {
+        'latitude': round(latitude, 6),
+        'longitude': round(longitude, 6),
+        'altitude': altitude,
+        'address': address,
+        'at': round(now, 1),
+    })
+    return True
 
 
 async def fix() -> Place:
