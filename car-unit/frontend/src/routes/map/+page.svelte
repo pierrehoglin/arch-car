@@ -12,12 +12,22 @@
   import { isDark } from '$lib/settings.svelte'
   import type { Address } from '$lib/api/types'
 
-  /* The map, north up. Pan and zoom only for now: no position, no
-     rotation. The chrome over it -- search, speed, controls -- was
-     laid out first and stays as it was. */
+  /* The map: pan, zoom and rotate, never tilted. Opens north up; a
+     compass appears once it has been turned, and turns it back. The
+     chrome over it -- search, speed, controls -- was laid out first
+     and stays as it was. */
 
   /** Where the map opens, until there is a GPS position to open on. */
-  const START = { center: [18.0686, 59.3293] as [number, number], zoom: 12 }
+  const START = {
+    center: [18.0686, 59.3293] as [number, number],
+    zoom: 12,
+    bearing: 0,
+  }
+
+  /** Degrees off north before the compass is worth showing. MapLibre
+   *  snaps anything inside 7 back to north at the end of a twist, so
+   *  a smaller angle never stays on screen anyway. */
+  const TURNED = 0.5
 
   /** How far past the archive's edge panning may go, in degrees. A
    *  little slack so a border town is not pinned to the screen edge;
@@ -36,6 +46,10 @@
   /** Set once the style has loaded, so the theme effect below knows
    *  there is something to restyle. */
   let ready = $state(false)
+
+  /** Which way the map faces, in degrees clockwise from north.
+   *  Mirrored from MapLibre, for the compass. */
+  let bearing = $state(0)
 
   /** Why there is no map, when there is not. */
   let problem = $state<{ title: string; detail: string } | null>(null)
@@ -78,16 +92,19 @@
             [west - BOUNDS_SLACK, south - BOUNDS_SLACK],
             [east + BOUNDS_SLACK, north + BOUNDS_SLACK],
           ],
-          /* North up, always. Rotation and tilt are for following a
-             position, which comes later. */
-          dragRotate: false,
+          /* Rotation yes -- two fingers twisting, or right-drag and
+             Ctrl-drag with a mouse. Tilt no: a flat map reads at a
+             glance, and a tilt picked up by accident while rotating
+             is hard to undo on a touch screen. */
           pitchWithRotate: false,
           touchPitch: false,
+          maxPitch: 0,
           /* Shown in our own corner instead, in the panel's type. */
           attributionControl: false,
         })
-        created.touchZoomRotate.disableRotation()
-        created.keyboard.disableRotation()
+        created.on('rotate', () => {
+          bearing = created?.getBearing() ?? 0
+        })
 
         created.on('load', () => {
           if (!cancelled) ready = true
@@ -154,6 +171,9 @@
   const zoomIn = () => map?.zoomIn()
   const zoomOut = () => map?.zoomOut()
   const backToStart = () => map?.easeTo({ ...START, duration: 600 })
+  const faceNorth = () => map?.easeTo({ bearing: 0, duration: 400 })
+
+  const turned = $derived(Math.abs(bearing) > TURNED)
 
   /** Long enough that the list is not rebuilt mid-word, short enough
    *  that it still feels like it follows the typing. */
@@ -294,6 +314,28 @@
   </div>
 
   <div class="controls">
+    <!-- Only while the map is turned. At the top of a column anchored
+         to the bottom, so the buttons below it do not move when it
+         comes and goes. The needle points where north is. -->
+    {#if turned}
+      <button
+        class="control compass"
+        aria-label="Face north"
+        disabled={!ready}
+        onclick={faceNorth}
+      >
+        <svg
+          viewBox="0 0 24 24"
+          width="26"
+          height="26"
+          aria-hidden="true"
+          style:transform="rotate({-bearing}deg)"
+        >
+          <path class="north" d="M12 2 L16 12 L8 12 Z" />
+          <path class="south" d="M12 22 L8 12 L16 12 Z" />
+        </svg>
+      </button>
+    {/if}
     <!-- Back to where the map opened, for now. Becomes "centre on
          the car" once there is a position. -->
     <button
@@ -603,6 +645,16 @@
     color: var(--accent-ink);
     background: var(--accent);
     border-color: transparent;
+  }
+
+  /* The north half in the accent, so which end is which reads
+     without a letter on it. */
+  .compass .north {
+    fill: var(--accent);
+  }
+
+  .compass .south {
+    fill: var(--text-dim);
   }
 
   .control:disabled {
