@@ -21,5 +21,15 @@ export const search = (query: string, limit = 5) =>
     query: { q: query, limit },
   })
 
-/** Places that have been saved, in the order they were saved. */
+/** Places that have been saved, by name. */
 export const saved = () => request<Place[]>('/places')
+
+/** Where the car is, as the geocoder last recorded it. Null before
+ *  the first GPS fix. */
+export const current = () => request<Place | null>('/places/current')
+
+/** Remove a saved place. Answers with the places that are left. */
+export const forget = (name: string) =>
+  request<Place[]>(`/places/${encodeURIComponent(name)}`, {
+    method: 'DELETE',
+  })

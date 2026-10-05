@@ -11,23 +11,23 @@ import { Protocol } from 'pmtiles'
  * it imports and hand back where it put it. */
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
 import { layers, namedFlavor } from '@protomaps/basemaps'
-import { TILES_PATH } from '../api/map'
+import { FONTS_PATH, SPRITES_PATH, TILES_PATH } from '../api/map'
 
 /* The map's look, built from the Protomaps basemap layers rather
  * than a style file: the flavour follows the panel's theme, and the
  * labels are asked for in Swedish where the data has them.
  *
- * Glyphs (label fonts) and sprites (icons) still come from the
- * Protomaps CDN. The tiles are offline; the labels are not yet, and
- * without signal the map draws with no text on it. Bundling them is
- * a separate step -- the font set alone is several megabytes. */
+ * Glyphs (label fonts) and sprites (icons) come from the daemon once
+ * they have been downloaded in Settings > Map, and from the Protomaps
+ * site until then -- so a car that has never had them still shows
+ * names while it has signal. */
 
 const SOURCE = 'protomaps'
 
-const GLYPHS =
+const ONLINE_GLYPHS =
   'https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf'
 
-const SPRITES = 'https://protomaps.github.io/basemaps-assets/sprites/v4'
+const ONLINE_SPRITES = 'https://protomaps.github.io/basemaps-assets/sprites/v4'
 
 let registered = false
 
@@ -41,13 +41,23 @@ export function registerProtocol(): void {
   registered = true
 }
 
-export function mapStyle(dark: boolean): StyleSpecification {
+/** `localLabels`: the daemon has the fonts and icons. */
+export function mapStyle(
+  dark: boolean,
+  localLabels: boolean,
+): StyleSpecification {
   const flavor = dark ? 'dark' : 'light'
+  const glyphs = localLabels
+    ? `${location.origin}${FONTS_PATH}`
+    : ONLINE_GLYPHS
+  const sprites = localLabels
+    ? `${location.origin}${SPRITES_PATH}`
+    : ONLINE_SPRITES
 
   return {
     version: 8,
-    glyphs: GLYPHS,
-    sprite: `${SPRITES}/${flavor}`,
+    glyphs,
+    sprite: `${sprites}/${flavor}`,
     sources: {
       [SOURCE]: {
         type: 'vector',

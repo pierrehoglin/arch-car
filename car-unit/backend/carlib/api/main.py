@@ -36,7 +36,7 @@ from carlib.core.errors import CarError, NotFoundError
 from carlib.api import events, routes
 from carlib.bluetooth.pairing import Pairing
 from carlib.location import geocoding
-from carlib.navigation import tiles
+from carlib.navigation import tiles, download
 from carlib.radio import fm
 from carlib.system import audio, source
 
@@ -357,7 +357,21 @@ async def lifespan(app: FastAPI):
     _network_watch = asyncio.create_task(_watch_network())
     _fm_watch = asyncio.create_task(_watch_fm())
 
+    # Map downloads report through the stream, so Settings > Map can
+    # show progress -- and a screen opened halfway through picks it up
+    # from the replay.
+    download.on_change = lambda: events.events.publish(
+        'map', download.status())
+
+    # A download cut off by the daemon stopping -- the ignition going
+    # off -- leaves its half-written file behind. Nothing is
+    # downloading yet, so anything partial now is a leftover.
+    for leftover in download.cleanup():
+        log.info('map: removed leftover %s', leftover)
+
     yield
+
+    await download.cancel()
 
     # Before the tasks. An open event stream never finishes on its
     # own, so uvicorn waits for it through the whole graceful
@@ -513,6 +527,11 @@ class AnswerBody(BaseModel):
 class Point(BaseModel):
     lat: float
     lon: float
+
+
+class MapDownloadBody(BaseModel):
+    # None means the last one chosen, from map.maxzoom.
+    maxzoom: int | None = None
 
 
 class RouteBody(BaseModel):
@@ -1094,8 +1113,64 @@ async def post_navigate_match(body: RouteBody) -> dict:
 
 @api.get('/map')
 async def get_map() -> dict:
-    """Whether an offline map is installed, and where."""
-    return tiles.status()
+    """
+    What is installed, the newest build if it has been looked up, and
+    any download in progress. No network: see /map/latest.
+    """
+    return download.status()
+
+
+@api.post('/map/latest')
+async def post_map_latest() -> dict:
+    """Look up the newest map build, then answer as GET /map."""
+    await download.latest(refresh=True)
+    status = download.status()
+    events.events.publish('map', status)
+    return status
+
+
+@api.get('/map/estimate')
+async def get_map_estimate(maxzoom: int) -> dict:
+    """How big Sweden is at this detail level, in bytes."""
+    return await download.estimate(maxzoom)
+
+
+@api.post('/map/download')
+async def post_map_download(body: MapDownloadBody | None = None) -> dict:
+    """Start downloading the map. Progress arrives as `map` events."""
+    download.start_tiles((body or MapDownloadBody()).maxzoom)
+    return download.status()
+
+
+@api.post('/map/labels/download')
+async def post_map_labels_download() -> dict:
+    """Start downloading label fonts and icons."""
+    download.start_labels()
+    return download.status()
+
+
+@api.post('/map/cancel')
+async def post_map_cancel() -> dict:
+    return await download.cancel()
+
+
+# Cached for a day rather than for ever: the names never change, but
+# an update replaces the contents, and a day is soon enough to see it.
+LABEL_CACHE = {'Cache-Control': 'public, max-age=86400'}
+
+
+@api.get('/map/fonts/{stack}/{span}.pbf')
+async def get_map_font(stack: str, span: str) -> FileResponse:
+    """One glyph range, as MapLibre asks for them."""
+    return FileResponse(tiles.font(stack, span),
+                        media_type='application/x-protobuf',
+                        headers=LABEL_CACHE)
+
+
+@api.get('/map/sprites/{name}')
+async def get_map_sprite(name: str) -> FileResponse:
+    """An icon sheet (.png) or its index (.json)."""
+    return FileResponse(tiles.sprite(name), headers=LABEL_CACHE)
 
 
 @api.get('/map/tiles.pmtiles')

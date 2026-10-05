@@ -43,6 +43,11 @@
   /** Which flavour the map was last given. Plain, like the map. */
   let flavour: boolean | null = null
 
+  /** Whether the daemon has the label fonts and icons, as it said
+   *  when the map was built. Downloaded later, they are picked up the
+   *  next time the screen opens. */
+  let localLabels = false
+
   /** Set once the style has loaded, so the theme effect below knows
    *  there is something to restyle. */
   let ready = $state(false)
@@ -78,10 +83,11 @@
         const [west, south, east, north] = info.bounds
         const dark = untrack(isDark)
         flavour = dark
+        localLabels = info.labels.available
 
         created = new MapLibre({
           container: element,
-          style: mapStyle(dark),
+          style: mapStyle(dark, localLabels),
           center: START.center,
           zoom: START.zoom,
           minZoom: 4,
@@ -165,7 +171,7 @@
     const dark = isDark()
     if (!ready || !map || dark === flavour) return
     flavour = dark
-    map.setStyle(mapStyle(dark))
+    map.setStyle(mapStyle(dark, localLabels))
   })
 
   const zoomIn = () => map?.zoomIn()

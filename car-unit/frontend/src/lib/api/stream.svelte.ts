@@ -36,6 +36,7 @@ const KNOWN = [
   'pairing',
   'media',
   'network',
+  'map',
 ] as const
 
 const handlers = new Map<string, Set<Handler>>()

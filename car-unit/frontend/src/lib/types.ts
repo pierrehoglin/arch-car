@@ -32,6 +32,8 @@ export const SETTINGS_SECTIONS: Section[] = [
   { href: '/settings/display', label: 'Display' },
   { href: '/settings/sound', label: 'Sound' },
   { href: '/settings/radio', label: 'Radio' },
+  { href: '/settings/map', label: 'Map' },
+  { href: '/settings/places', label: 'Places' },
   { href: '/settings/connectivity', label: 'Connectivity' },
   { href: '/settings/vehicle', label: 'Vehicle' },
   { href: '/settings/driver-assist', label: 'Driver Assist' },

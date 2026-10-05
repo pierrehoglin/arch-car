@@ -364,8 +364,11 @@ CATALOGUE: tuple[Known, ...] = (
           'weather.provider is openweather.'),
     Known('map.tiles', '', 'Path to the offline map, a PMTiles '
           'archive. Empty means ~/.local/share/carlib/maps/'
-          'sweden.pmtiles. See carlib/navigation/tiles.py for how to '
-          'make one.'),
+          'sweden.pmtiles.'),
+    Known('map.maxzoom', 15, 'Detail of the downloaded map, 12 to 15. '
+          'Each level roughly doubles the size.', 'int'),
+    Known('map.pmtiles', '', 'Path to the pmtiles tool, if it is not '
+          'on PATH or in ~/.local/bin.'),
     Known('navigation.url', 'https://valhalla1.openstreetmap.de',
           'Valhalla router. The public one allows one call per '
           'second; a local instance reroutes without signal.'),
