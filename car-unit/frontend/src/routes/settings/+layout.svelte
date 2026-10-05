@@ -3,7 +3,7 @@
   import type { Snippet } from 'svelte'
   import Icon from '$lib/Icon.svelte'
   import Card from '$lib/ui/Card.svelte'
-  import { DEV_SECTIONS, SETTINGS_SECTIONS } from '$lib/types'
+  import { SETTINGS_SECTIONS } from '$lib/types'
 
   interface Props {
     children: Snippet
@@ -13,9 +13,7 @@
 
   const path = $derived(page.url.pathname)
 
-  const sections = import.meta.env.DEV
-    ? [...SETTINGS_SECTIONS, ...DEV_SECTIONS]
-    : SETTINGS_SECTIONS
+  const sections = SETTINGS_SECTIONS
 </script>
 
 <div class="settings">

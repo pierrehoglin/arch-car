@@ -5,12 +5,10 @@
  * so the same relative paths work in both, with no base URL that
  * differs by environment and no CORS.
  *
- * There is no mock branch here. In development Mirage intercepts
- * fetch, so this code does a real request to a real URL and reads
- * real status codes -- the same path that runs against the daemon.
- * A mock inside the client would be a second code path that only
- * development exercises, and the first time it drifted, a screen
- * would work here and fail on the unit.
+ * There are no mocks. In development the dev server proxies to a
+ * running carlibd, so every screen is built against the real daemon
+ * -- the same requests, the same answers, the same failures as on
+ * the unit.
  */
 
 /** How the API reports a failure: carlib.core.errors mapped to
