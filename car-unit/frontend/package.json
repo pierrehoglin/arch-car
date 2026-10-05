@@ -44,6 +44,9 @@
   "dependencies": {
     "@fontsource/barlow": "^5.3.0",
     "@fontsource/noto-color-emoji": "^5.3.2",
-    "@fontsource/saira-semi-condensed": "^5.3.0"
+    "@fontsource/saira-semi-condensed": "^5.3.0",
+    "@protomaps/basemaps": "^5.7.2",
+    "maplibre-gl": "^6.11.2",
+    "pmtiles": "^4.5.0"
   }
 }

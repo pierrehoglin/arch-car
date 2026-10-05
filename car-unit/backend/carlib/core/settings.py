@@ -362,6 +362,10 @@ CATALOGUE: tuple[Known, ...] = (
     Known('weather.openweather.key', '', 'OpenWeather API key, from '
           'home.openweathermap.org/api_keys. Needed only if '
           'weather.provider is openweather.'),
+    Known('map.tiles', '', 'Path to the offline map, a PMTiles '
+          'archive. Empty means ~/.local/share/carlib/maps/'
+          'sweden.pmtiles. See carlib/navigation/tiles.py for how to '
+          'make one.'),
     Known('navigation.url', 'https://valhalla1.openstreetmap.de',
           'Valhalla router. The public one allows one call per '
           'second; a local instance reroutes without signal.'),

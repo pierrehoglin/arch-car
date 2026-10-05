@@ -17,10 +17,15 @@ export default defineConfig({
   build: {
     assetsInlineLimit: 40 * 1024 * 1024 // 40MB
   },
+  worker: {
+    format: 'es'
+  },
   server: {
     proxy: {
-      '/api': 'http://127.0.0.1:8099'
-      // ...
+      '/api': {
+        target: 'http://127.0.0.1:8099',
+        changeOrigin: true
+      }
     },
     host: '127.0.0.1',
     port: 5173

@@ -21,6 +21,9 @@ export default {
     }),
     output: {
       bundleStrategy: 'inline'
+    },
+    paths: {
+      relative: false
     }
   }
 };

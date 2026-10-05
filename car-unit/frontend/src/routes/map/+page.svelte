@@ -1,13 +1,159 @@
 <script lang="ts">
+  import { untrack } from 'svelte'
+  import { Map as MapLibre } from 'maplibre-gl'
+  import 'maplibre-gl/dist/maplibre-gl.css'
   import Icon from '$lib/Icon.svelte'
   import Keyboard from '$lib/ui/Keyboard.svelte'
   import Spinner from '$lib/ui/Spinner.svelte'
   import { MIN_CHARS, suggest } from '$lib/api/places'
+  import * as mapApi from '$lib/api/map'
+  import { RequestFailed } from '$lib/api/client'
+  import { mapStyle, registerProtocol } from '$lib/map/style'
+  import { isDark } from '$lib/settings.svelte'
   import type { Address } from '$lib/api/types'
 
-  /* The map itself is not here yet. This is the chrome that sits over
-     it -- search, speed, and the controls -- so the layout is settled
-     before MapLibre and the pmtiles archive are wired in. */
+  /* The map, north up. Pan and zoom only for now: no position, no
+     rotation. The chrome over it -- search, speed, controls -- was
+     laid out first and stays as it was. */
+
+  /** Where the map opens, until there is a GPS position to open on. */
+  const START = { center: [18.0686, 59.3293] as [number, number], zoom: 12 }
+
+  /** How far past the archive's edge panning may go, in degrees. A
+   *  little slack so a border town is not pinned to the screen edge;
+   *  not so much that the map can be lost in empty background. */
+  const BOUNDS_SLACK = 1.5
+
+  let container = $state<HTMLDivElement>()
+
+  /* Plain, not $state: MapLibre owns its own state, and proxying the
+     instance would wrap every internal object it touches. */
+  let map: MapLibre | undefined
+
+  /** Which flavour the map was last given. Plain, like the map. */
+  let flavour: boolean | null = null
+
+  /** Set once the style has loaded, so the theme effect below knows
+   *  there is something to restyle. */
+  let ready = $state(false)
+
+  /** Why there is no map, when there is not. */
+  let problem = $state<{ title: string; detail: string } | null>(null)
+
+  /* Built once, when the container exists. untrack around the theme,
+     so switching Day/Night restyles the map rather than tearing it
+     down and building another -- that is the next effect's job. */
+  $effect(() => {
+    const element = container
+    if (!element) return
+
+    let cancelled = false
+    let created: MapLibre | undefined
+
+    mapApi
+      .status()
+      .then((info) => {
+        if (cancelled) return
+
+        if (!info.available) {
+          problem = { title: 'No map installed', detail: info.hint }
+          return
+        }
+
+        registerProtocol()
+        const [west, south, east, north] = info.bounds
+        const dark = untrack(isDark)
+        flavour = dark
+
+        created = new MapLibre({
+          container: element,
+          style: mapStyle(dark),
+          center: START.center,
+          zoom: START.zoom,
+          minZoom: 4,
+          /* The archive stops at 15; beyond it MapLibre stretches the
+             last level, which stays sharp because it is vectors. */
+          maxZoom: 18,
+          maxBounds: [
+            [west - BOUNDS_SLACK, south - BOUNDS_SLACK],
+            [east + BOUNDS_SLACK, north + BOUNDS_SLACK],
+          ],
+          /* North up, always. Rotation and tilt are for following a
+             position, which comes later. */
+          dragRotate: false,
+          pitchWithRotate: false,
+          touchPitch: false,
+          /* Shown in our own corner instead, in the panel's type. */
+          attributionControl: false,
+        })
+        created.touchZoomRotate.disableRotation()
+        created.keyboard.disableRotation()
+
+        created.on('load', () => {
+          if (!cancelled) ready = true
+        })
+        created.on('error', (event) => {
+          const message = event.error?.message ?? String(event)
+          console.warn('map:', message)
+
+          /* Said on screen when it stops the map from appearing at
+             all -- a grey panel with the reason in the console is no
+             help on a car's screen. Not for failures from elsewhere:
+             the label fonts and icons still come from the internet,
+             and losing them without signal should leave a map with
+             no names, not a message instead of the map. */
+          const url = (event.error as { url?: string } | undefined)?.url ?? ''
+          const elsewhere =
+            /^https?:/.test(url) && !url.startsWith(location.origin)
+          if (!ready && !cancelled && !elsewhere) {
+            problem = { title: 'The map did not load', detail: message }
+          }
+        })
+
+        map = created
+      })
+      .catch((cause) => {
+        if (cancelled) return
+        /* Two different failures land here: the daemon not answering
+           the status call, and MapLibre refusing to start -- most
+           often because the browser has no WebGL. Saying "is carlibd
+           running?" for the second would send you to the wrong
+           place. */
+        problem =
+          cause instanceof RequestFailed
+            ? {
+                title: 'Map unavailable',
+                detail: 'The car service did not answer. Is carlibd running?',
+              }
+            : {
+                title: 'The map could not start',
+                detail: cause instanceof Error ? cause.message : String(cause),
+              }
+        console.warn('map:', cause)
+      })
+
+    return () => {
+      cancelled = true
+      ready = false
+      flavour = null
+      created?.remove()
+      map = undefined
+    }
+  })
+
+  /* Day and Night. The flavour is a different set of paint values on
+     the same layers, so MapLibre diffs it in place -- no flash, and
+     the tiles already loaded are kept. */
+  $effect(() => {
+    const dark = isDark()
+    if (!ready || !map || dark === flavour) return
+    flavour = dark
+    map.setStyle(mapStyle(dark))
+  })
+
+  const zoomIn = () => map?.zoomIn()
+  const zoomOut = () => map?.zoomOut()
+  const backToStart = () => map?.easeTo({ ...START, duration: 600 })
 
   /** Long enough that the list is not rebuilt mid-word, short enough
    *  that it still feels like it follows the typing. */
@@ -77,9 +223,14 @@
 </script>
 
 <div class="map">
-  <div class="surface" aria-hidden="true">
-    <p class="pending">Map</p>
-  </div>
+  <div class="canvas" bind:this={container}></div>
+
+  {#if problem}
+    <div class="surface">
+      <p class="pending">{problem.title}</p>
+      <p class="help">{problem.detail}</p>
+    </div>
+  {/if}
 
   <div class="search">
     <div class="query">
@@ -143,18 +294,35 @@
   </div>
 
   <div class="controls">
-    <button class="control primary" aria-label="Centre on position">
+    <!-- Back to where the map opened, for now. Becomes "centre on
+         the car" once there is a position. -->
+    <button
+      class="control primary"
+      aria-label="Back to start"
+      disabled={!ready}
+      onclick={backToStart}
+    >
       <Icon name="crosshair" size={22} />
     </button>
-    <button class="control" aria-label="Reset bearing">
-      <Icon name="compass" size={22} />
+    <button
+      class="control"
+      aria-label="Zoom in"
+      disabled={!ready}
+      onclick={zoomIn}
+    >
+      <Icon name="add" size={22} />
     </button>
-    <button class="control" aria-label="Zoom out">
+    <button
+      class="control"
+      aria-label="Zoom out"
+      disabled={!ready}
+      onclick={zoomOut}
+    >
       <Icon name="remove" size={22} />
     </button>
   </div>
 
-  <p class="attribution">© OpenStreetMap contributors</p>
+  <p class="attribution">© Protomaps · © OpenStreetMap contributors</p>
 
   <!-- Live, so suggestions can follow the typing. The field stays
        visible above the sheet, which is what makes that worth doing;
@@ -188,13 +356,37 @@
     overflow: hidden;
   }
 
-  /* Stand-in for the map canvas. Deliberately plain -- a fake street
-     grid would only be mistaken for the real thing in a screenshot. */
-  .surface {
-    display: grid;
-    place-items: center;
-    height: 100%;
+  /* MapLibre fills this and draws into a canvas of its own. The
+     panel colour shows until the first tiles arrive. */
+  .canvas {
+    position: absolute;
+    inset: 0;
     background: var(--panel-2);
+  }
+
+  /* Said in place of the map when there is none. Over the canvas, so
+     the search and controls still sit on top of it. */
+  .surface {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-s);
+    padding: 0 15%;
+    text-align: center;
+    background: var(--panel-2);
+  }
+
+  .help {
+    max-width: 60ch;
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text-dim);
+    user-select: text;
+    word-break: break-word;
   }
 
   .pending {
@@ -411,6 +603,11 @@
     color: var(--accent-ink);
     background: var(--accent);
     border-color: transparent;
+  }
+
+  .control:disabled {
+    opacity: 0.4;
+    cursor: default;
   }
 
   .control:focus-visible {

@@ -36,6 +36,7 @@ from carlib.core.errors import CarError, NotFoundError
 from carlib.api import events, routes
 from carlib.bluetooth.pairing import Pairing
 from carlib.location import geocoding
+from carlib.navigation import tiles
 from carlib.radio import fm
 from carlib.system import audio, source
 
@@ -1089,6 +1090,24 @@ async def post_navigate_match(body: RouteBody) -> dict:
     """Snap a GPS trace onto the road network."""
     return await routes.navigate_match(
         [(p.lat, p.lon) for p in body.points], body.costing)
+
+
+@api.get('/map')
+async def get_map() -> dict:
+    """Whether an offline map is installed, and where."""
+    return tiles.status()
+
+
+@api.get('/map/tiles.pmtiles')
+async def get_map_tiles() -> FileResponse:
+    """
+    The map archive, read by the browser in byte ranges.
+
+    No long cache: the file is replaced when a new extract is made,
+    and FileResponse's ETag lets the browser check cheaply.
+    """
+    return FileResponse(tiles.archive(),
+                        media_type='application/octet-stream')
 
 
 @api.get('/navigate/status')

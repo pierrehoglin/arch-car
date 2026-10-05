@@ -47,12 +47,12 @@ export function handlersFor(enabled: Record<string, boolean>) {
  * matters.
  */
 export const startMocking = (enabled: Record<string, boolean>) => {
-  worker.resetHandlers(...handlersFor(enabled))
-  return worker.start({
-    onUnhandledRequest: 'bypass',
-    quiet: false,
-    serviceWorker: { url: '/mockServiceWorker.js' },
-  })
+  // worker.resetHandlers(...handlersFor(enabled))
+  // return worker.start({
+  //   onUnhandledRequest: 'bypass',
+  //   quiet: false,
+  //   serviceWorker: { url: '/mockServiceWorker.js' },
+  // })
 }
 
 /** Change which groups are mocked, without a restart. */
