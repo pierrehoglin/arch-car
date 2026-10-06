@@ -46,6 +46,7 @@
   import IconArrowUp from '~icons/tabler/arrow-up'
   import IconBackspace from '~icons/tabler/backspace'
   import IconClose from '~icons/tabler/x'
+  import IconChevronDown from '~icons/tabler/chevron-down'
   import IconChevronLeft from '~icons/tabler/chevron-left'
   import IconChevronRight from '~icons/tabler/chevron-right'
   import IconCar from '~icons/tabler/brand-speedtest'
@@ -126,6 +127,7 @@
     right: IconArrowRight,
     up: IconArrowUp,
     close: IconClose,
+    'chevron-down': IconChevronDown,
     'chevron-left': IconChevronLeft,
     'chevron-right': IconChevronRight,
     car: IconCar,

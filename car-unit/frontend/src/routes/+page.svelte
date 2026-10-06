@@ -62,7 +62,9 @@
 
   $effect(() => watch())
 
-  const forecast = $derived(weather.forecast)
+  /* Always where the car is. The forecast dialog can look at a saved
+     place, but that is its own choice and never shows up here. */
+  const forecast = $derived(weather.here)
   const current = $derived(forecast?.current)
   const condition = $derived(current?.condition ?? 'unknown')
 

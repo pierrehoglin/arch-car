@@ -2,6 +2,7 @@
   import Icon from '../Icon.svelte'
   import Button from './Button.svelte'
   import Dialog from './Dialog.svelte'
+  import Dropdown from './Dropdown.svelte'
   import Spinner from './Spinner.svelte'
   import { untrack } from 'svelte'
   import {
@@ -21,10 +22,16 @@
 
   let { open, onclose }: Props = $props()
 
-  /* untracked, because loadPlaces reads weather.places to decide
-     whether to fetch and then sets it. */
+  /* Every time it opens: on the current position, since it is opened
+     from the current weather, and with the places reloaded, so one
+     saved in Settings since the last time is there. untracked: both
+     read and set the store, and neither should re-run this. */
   $effect(() => {
-    if (open) untrack(() => loadPlaces())
+    if (!open) return
+    untrack(() => {
+      choose(CURRENT_PLACE)
+      loadPlaces()
+    })
   })
 
   /* "Here" first, then whatever has been saved. Reserved rather than
@@ -69,9 +76,11 @@
   const round = (value: number | null | undefined) =>
     value === null || value === undefined ? '—' : `${Math.round(value)}`
 
-  /** Wind in km/h, since that is what a car speedometer reads in. */
-  const kmh = (metresPerSecond: number | null) =>
-    metresPerSecond === null ? '—' : `${Math.round(metresPerSecond * 3.6)}`
+  /** Wind in whole metres per second, as SMHI and every Swedish
+   *  forecast give it -- the unit the warnings and the "frisk vind"
+   *  scale are in. The providers send m/s already. */
+  const ms = (metresPerSecond: number | null) =>
+    metresPerSecond === null ? '—' : `${Math.round(metresPerSecond)}`
 
   /* Only the readings this provider actually sent. MET has no
      visibility and OpenWeather no percentiles, and a tile reading
@@ -81,7 +90,7 @@
 
     const all = [
       { label: 'Feels like', value: round(now.feels_like), unit: '°' },
-      { label: 'Wind', value: kmh(now.wind_speed), unit: ' km/h' },
+      { label: 'Wind', value: ms(now.wind_speed), unit: ' m/s' },
       { label: 'Humidity', value: round(now.humidity), unit: '%' },
       { label: 'UV index', value: round(now.uv_index), unit: '' },
       { label: 'Cloud', value: round(now.cloud_cover), unit: '%' },
@@ -113,43 +122,42 @@
         <p class="detail">{weather.error || 'Nothing has arrived yet.'}</p>
       </div>
     {:else}
-      {#if places.length > 1}
-        <div class="places">
-          <!-- By position: saved places are named by whoever saved
-               them, and nothing stops two being called Hemma. -->
-          {#each places as place, index (index)}
-            <Button
-              variant="quiet"
-              pressed={weather.place === place.name}
-              disabled={weather.loading}
-              onclick={() => choose(place.name)}
-            >
-              {place.label}
-            </Button>
-          {/each}
-
-          <!-- Beside the chips rather than over the readings: what is
-               being waited for is the place, and that is where the
-               eye already is. -->
-          {#if weather.loading}
-            <span class="switching">
-              <Spinner size={20} label="Loading the forecast" />
-            </span>
-          {/if}
-        </div>
-      {/if}
-
       <!-- Dimmed while a new place loads. The numbers below are still
            the last place's, and they have to look provisional or they
            read as the new one's. -->
       <div class="readings" class:stale={weather.loading}>
-        <section>
-          <div class="eyebrow">Now</div>
-          <div class="current">
-            <Icon name={iconFor(now?.condition ?? 'unknown')} size={44} />
-            <span class="degrees">{round(now?.temperature)}°</span>
-            <span class="says">{nameFor(now?.condition ?? 'unknown')}</span>
+        <section class="now">
+          <div>
+            <div class="eyebrow">Now</div>
+            <div class="current">
+              <Icon name={iconFor(now?.condition ?? 'unknown')} size={44} />
+              <span class="degrees">{round(now?.temperature)}°</span>
+              <span class="says">{nameFor(now?.condition ?? 'unknown')}</span>
+            </div>
           </div>
+
+          <!-- Where the forecast is for, beside what it says: the
+               current conditions are a short line, and the space to
+               their right was empty. Only with somewhere to choose. -->
+          {#if places.length > 1}
+            <div class="picker">
+              <!-- Beside the picker rather than over the readings:
+                   what is being waited for is the place. -->
+              {#if weather.loading}
+                <Spinner size={20} label="Loading the forecast" />
+              {/if}
+              <Dropdown
+                label="Forecast for"
+                value={weather.place}
+                options={places.map((place) => ({
+                  value: place.name,
+                  label: place.label,
+                }))}
+                disabled={weather.loading}
+                onchange={(name) => choose(name)}
+              />
+            </div>
+          {/if}
         </section>
 
         {#if stats.length}
@@ -235,30 +243,33 @@
     margin-bottom: var(--spacing-l);
   }
 
-  /* Scrolls sideways rather than wrapping: however many places get
-     saved, the row stays one line and the dialog does not grow a
-     block of chips at the top of it. */
-  .places {
+  /* The current conditions on the left, the place picker on the
+     right, level with the bottom of the readings rather than with
+     the "Now" heading above them. */
+  .now {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: var(--spacing);
+  }
+
+  .picker {
     display: flex;
     align-items: center;
     gap: var(--spacing-s);
-    margin-bottom: var(--spacing-l);
-    padding-bottom: 4px;
-    overflow-x: auto;
-  }
-
-  .switching {
-    display: grid;
-    place-items: center;
     flex-shrink: 0;
-    padding-left: var(--spacing-xs);
   }
 
-  .readings {
+  /* Everything but the picker: the readings are the last place's
+     until the new ones arrive, while the picker -- and its spinner --
+     is the part saying what is happening. */
+  .readings > :is(section:not(.now), .source),
+  .now > :first-child {
     transition: opacity 160ms ease;
   }
 
-  .readings.stale {
+  .readings.stale > :is(section:not(.now), .source),
+  .readings.stale .now > :first-child {
     opacity: 0.4;
     /* Nothing in here should be tappable while it describes somewhere
        else. */
@@ -266,7 +277,8 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .readings {
+    .readings > :is(section:not(.now), .source),
+    .now > :first-child {
       transition: none;
     }
   }

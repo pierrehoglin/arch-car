@@ -239,6 +239,28 @@ def _here_label() -> str:
     return town or 'Here'
 
 
+async def weather_forecast(place: str | None = None,
+                           refresh: bool = False) -> dict:
+    """
+    The forecast for a saved place, or for where the car is.
+
+    The weather service does the work and the caching -- one entry per
+    kilometre square, kept until the provider says it has expired --
+    so the screens can ask every few minutes at no cost. This only
+    adds what they need on top: one row per day, which the CLI works
+    out for itself, and a place name worth showing.
+    """
+    from carlib.weather import service
+
+    found = await service.forecast(place=place, refresh=refresh)
+    data = found.to_dict()
+    data['daily'] = [day.to_dict() for day in found.daily()]
+
+    if place is None or str(place).strip().lower() in places.RESERVED:
+        data['place'] = _here_label()
+    return data
+
+
 async def places_list() -> list[dict]:
     return [p.to_dict() for p in places.saved()]
 

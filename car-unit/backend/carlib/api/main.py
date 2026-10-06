@@ -831,6 +831,17 @@ async def get_geocode_current() -> dict | None:
     return await routes.geocode_current()
 
 
+@api.get('/weather')
+async def get_weather(place: str | None = None,
+                      refresh: bool = False) -> dict:
+    """
+    The forecast for a saved place, or for where the car is when no
+    place is named. Cached per location until the provider's Expires
+    time; `refresh` asks again regardless.
+    """
+    return await routes.weather_forecast(place, refresh)
+
+
 @api.get('/position')
 async def get_position() -> dict:
     """

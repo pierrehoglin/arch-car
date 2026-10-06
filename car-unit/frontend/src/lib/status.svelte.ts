@@ -21,5 +21,8 @@ interface Status {
 
 export const status = $state<Status>({
   bars: 4,
-  outside: 19,
+  /* Null, so the status bar shows nothing rather than a made-up
+     number. A fixed 19 sat beside the real forecast on the home
+     screen and disagreed with it. Filled in once CAN is wired. */
+  outside: null,
 })

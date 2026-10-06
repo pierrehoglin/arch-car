@@ -3,7 +3,12 @@ import { saved } from './api/places'
 import { RequestFailed } from './api/client'
 import { CURRENT_PLACE, type Condition, type Forecast, type Place } from './api/types'
 
-/* The forecast, shared between the dashboard and the dialog.
+/* The forecast, for the dashboard and the dialog.
+ *
+ * Two of them: the dashboard always shows where the car is, and the
+ * dialog can look at a saved place without that changing the
+ * dashboard. While the dialog is on the current position they are
+ * the same forecast, fetched once.
  *
  * Fetched rather than streamed: it changes on the hour, not on the
  * second, and the daemon already caches it per location and honours
@@ -15,20 +20,29 @@ import { CURRENT_PLACE, type Condition, type Forecast, type Place } from './api/
 const REFRESH_MS = 10 * 60 * 1000
 
 interface Store {
+  /** Where the car is. What the dashboard shows, always -- whatever
+   *  the dialog is looking at. */
+  here: Forecast | null
+
+  /** What the forecast dialog shows: `here` while it is on the
+   *  current position, a saved place's forecast otherwise. */
   forecast: Forecast | null
+  /** For the dialog's selection, not for `here` refreshing in the
+   *  background. */
   loading: boolean
   error: string
   /** When we last heard from the daemon, not when the provider last
    *  issued it -- that is `forecast.updated`. */
   fetched: number | null
 
-  /** Which place the forecast is for. */
+  /** Which place the dialog is showing. */
   place: string
   /** Saved places, for the picker. */
   places: Place[]
 }
 
 export const weather = $state<Store>({
+  here: null,
   forecast: null,
   loading: false,
   error: '',
@@ -37,66 +51,129 @@ export const weather = $state<Store>({
   places: [],
 })
 
-/* The guard, deliberately not reactive.
- *
- * Reading weather.loading here would make every $effect that calls
- * load() depend on it -- so finishing a load would invalidate the
- * effect, which would call load() again, for ever. The flag on the
- * store is for showing a spinner; this one is control flow, and the
- * two want different things.
- */
-let loading = false
+/* Control flow, deliberately not reactive.
 
-export async function load(refresh = false): Promise<void> {
+   watch() runs inside an $effect, and anything it reads from the
+   store becomes a dependency of that effect -- finishing a load would
+   invalidate it, which would load again, for ever. So the guards and
+   the selection are plain mirrors here; the store's fields are for
+   showing, these are for deciding. */
+let hereLoading = false
+let selected = CURRENT_PLACE
+/** Bumped per request for a saved place, so a slow answer for a
+ *  place already left is dropped rather than shown. */
+let ticket = 0
+
+function message(cause: unknown): string {
+  return cause instanceof RequestFailed || cause instanceof Error
+    ? cause.message
+    : String(cause)
+}
+
+/** The current position's forecast, for the dashboard -- and for the
+ *  dialog when it is showing the current position too. */
+async function loadHere(refresh = false): Promise<void> {
   /* Overlapping loads would race to set the same field, and the
      slower one would win. */
-  if (loading) return
+  if (hereLoading) return
+  hereLoading = true
 
-  loading = true
-  weather.loading = true
+  const forDialog = () => selected === CURRENT_PLACE
+  if (forDialog()) weather.loading = true
+
   try {
-    weather.forecast = await api.forecast(weather.place, refresh)
-    weather.fetched = Date.now()
-    weather.error = ''
+    const found = await api.forecast(CURRENT_PLACE, refresh)
+    weather.here = found
+    if (forDialog()) {
+      weather.forecast = found
+      weather.fetched = Date.now()
+      weather.error = ''
+    }
   } catch (cause) {
-    weather.error =
-      cause instanceof RequestFailed || cause instanceof Error
-        ? cause.message
-        : String(cause)
+    if (forDialog()) weather.error = message(cause)
   } finally {
-    loading = false
-    weather.loading = false
+    hereLoading = false
+    if (forDialog()) weather.loading = false
   }
 }
 
+/** A saved place's forecast, for the dialog only. */
+async function loadPlace(place: string, refresh = false): Promise<void> {
+  const mine = ++ticket
+  weather.loading = true
+  try {
+    const found = await api.forecast(place, refresh)
+    if (mine === ticket && selected === place) {
+      weather.forecast = found
+      weather.fetched = Date.now()
+      weather.error = ''
+    }
+  } catch (cause) {
+    if (mine === ticket) weather.error = message(cause)
+  } finally {
+    if (mine === ticket) weather.loading = false
+  }
+}
+
+/** What the dialog is showing, again. `refresh` skips the daemon's
+ *  cache -- the dialog's Refresh button. */
+export async function load(refresh = false): Promise<void> {
+  if (selected === CURRENT_PLACE) return loadHere(refresh)
+  return loadPlace(selected, refresh)
+}
+
 /**
- * Look somewhere else.
+ * Show somewhere else in the dialog.
  *
- * One selection, shared: the dialog is showing the forecast the
- * dashboard summarises, so having them disagree would mean two
- * forecasts on screen for two different places with nothing saying
- * which was which. The dashboard names the place it is showing.
+ * The dashboard is not affected: it always shows where the car is,
+ * so it can never be showing a saved place's weather under a heading
+ * that looks like the current one.
+ *
+ * The old forecast stays up while the new one is fetched. Clearing it
+ * collapses the dialog to a spinner and back, which for a request
+ * that takes a moment is more disruptive than the wait -- see the
+ * dimming and the spinner in the dialog.
  */
 export async function choose(place: string): Promise<void> {
-  if (place === weather.place) return
+  if (place === selected) return
+  selected = place
   weather.place = place
+  weather.error = ''
 
-  /* The old forecast stays up while the new one is fetched. Clearing
-     it collapses the dialog to a spinner and back, which for a
-     request that takes a moment is more disruptive than the wait.
-     
-     Showing readings for the place you have just left is only
-     acceptable while it is visibly pending -- see the dimming and the
-     spinner in the dialog -- and `forecast.place` keeps naming the
-     one on screen rather than the one selected. */
+  if (place === CURRENT_PLACE) {
+    /* Already here from the dashboard's refreshes; nothing to fetch
+       unless it has not arrived yet. */
+    ticket++
+    weather.loading = false
+    if (weather.here) {
+      weather.forecast = weather.here
+      return
+    }
+  }
   await load()
 }
 
-/** Saved places, fetched once. */
+/**
+ * Saved places, fetched every time the picker is shown.
+ *
+ * Not once and kept: places are added and removed in Settings, and a
+ * list held from the first opening never heard about them. It is a
+ * small local request, made when someone opens the forecast.
+ *
+ * A place that has gone while it was selected -- forgotten in
+ * Settings -- puts the forecast back on the current position rather
+ * than leaving a selection the daemon can no longer resolve.
+ */
 export async function loadPlaces(): Promise<void> {
-  if (weather.places.length) return
   try {
-    weather.places = await saved()
+    const places = await saved()
+    weather.places = places
+
+    const selected = weather.place
+    const known =
+      selected === CURRENT_PLACE ||
+      places.some((place) => place.name === selected)
+    if (!known) await choose(CURRENT_PLACE)
   } catch {
     // The picker falls back to the current position, which needs no
     // list.
@@ -104,13 +181,14 @@ export async function loadPlaces(): Promise<void> {
 }
 
 /**
- * Keep it current while a screen is mounted.
+ * Keep the current position's forecast fresh while a screen is
+ * mounted.
  *
  * Returns a stop function, so an $effect can hand it back.
  */
 export function watch(interval = REFRESH_MS): () => void {
-  load()
-  const timer = setInterval(() => load(), interval)
+  loadHere()
+  const timer = setInterval(() => loadHere(), interval)
   return () => clearInterval(timer)
 }
 
