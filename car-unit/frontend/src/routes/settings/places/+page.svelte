@@ -13,6 +13,11 @@
   import { RequestFailed } from '$lib/api/client'
   import type { Address, Place } from '$lib/api/types'
   import { distinguish } from '$lib/address'
+  import {
+    here as carPlace,
+    refresh as refreshPlace,
+    watch as watchPlace,
+  } from '$lib/place.svelte'
 
   /* Places the car knows by name -- home, work, the summer house --
      and where it is now. Saved places are what the weather offers to
@@ -23,7 +28,12 @@
      this screen is being looked at. */
 
   let saved = $state<Place[]>([])
-  let here = $state<Place | null>(null)
+
+  /* Where the car is: shared with the dashboard, and followed rather
+     than fetched once -- the 'place' event updates it as the address
+     changes, while this screen is open. */
+  const here = $derived(carPlace.place)
+  $effect(() => watchPlace())
   let loading = $state(true)
   let error = $state('')
 
@@ -47,13 +57,12 @@
     try {
       /* Separately: the position can fail -- no fix yet -- without
          that hiding the list. */
-      const [list, now] = await Promise.allSettled([
+      const [list] = await Promise.allSettled([
         places.saved(),
-        places.current(),
+        refreshPlace(),
       ])
       if (list.status === 'fulfilled') saved = list.value
       else report(list.reason)
-      here = now.status === 'fulfilled' ? now.value : null
     } finally {
       loading = false
     }

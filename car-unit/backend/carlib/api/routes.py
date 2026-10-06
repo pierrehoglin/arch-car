@@ -225,6 +225,10 @@ def _here_label() -> str:
     is fetched every ten minutes, and a reverse geocode each time
     would be a request the Nominatim policy does not cover.
     """
+    known = geocoding.current()
+    if known is not None and known.town:
+        return known.town
+
     address = ''
     tracked = places.current()
     if tracked is not None:
@@ -267,42 +271,30 @@ async def places_list() -> list[dict]:
 
 async def places_current() -> dict | None:
     """
-    Where the car is, or None before the GPS has a fix.
+    Where the car is, in words. None when nothing is known at all.
 
-    The geocoder keeps a position with its address up to date as the
-    car moves -- but only while geocoding.auto is on. Without it there
-    is nothing recorded, so this falls back to reading the GPS, as
-    `places current` on the command line does, and looks the address
-    up once.
+    The same payload as the 'place' event, for a screen opening before
+    the next one: the position -- live, last known or pinned, as the
+    map has it -- with its address in full.
 
-    The lookup is a request someone asked for by opening a screen,
-    which the Nominatim policy permits, and reverse() caches to about
-    a city block -- so a screen opened again from the same spot does
-    not ask twice.
+    Opening a screen that shows this is a request someone made, which
+    the Nominatim policy permits, so the address is looked up when
+    there is none for here. geocoding.address_here keeps that to the
+    cache when the car has not left the block, and inside the shared
+    per-minute budget when it has. The answer becomes the current
+    address, so the place tracker publishes it to every other screen.
     """
-    place = places.current()
-    if place is not None:
-        return {**place.to_dict(), 'last_known': False, 'at': None}
+    from carlib.location import position
 
-    try:
-        place = await places.fix()
-    except NotAvailableError:
-        # No fix yet -- the first minutes after the ignition. Where the
-        # car was when it last had one, said as such: a parked car is
-        # usually still there, but the screen should not claim to know.
-        last = places.last_known()
-        if last is None:
-            return None
-        place, at = last
-        return {**place.to_dict(), 'last_known': True, 'at': at}
+    reading = position.latest() or await position.read()
+    if not position.located(reading):
+        return None
 
-    try:
-        found = await geocoding.reverse(place.latitude, place.longitude)
-        place.address = found.short
-    except Exception:
-        pass        # coordinates without an address are still an answer
-
-    return {**place.to_dict(), 'last_known': False, 'at': None}
+    address = await geocoding.address_here(reading['latitude'],
+                                           reading['longitude'])
+    if address is None:
+        address = position.address_for(reading)
+    return position.describe(reading, address)
 
 
 async def places_save(name: str, latitude: float | None = None,

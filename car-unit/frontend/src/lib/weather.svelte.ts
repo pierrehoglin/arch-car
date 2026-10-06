@@ -1,7 +1,16 @@
 import * as api from './api/weather'
 import { saved } from './api/places'
 import { RequestFailed } from './api/client'
-import { CURRENT_PLACE, type Condition, type Forecast, type Place } from './api/types'
+import { on } from './api/stream.svelte'
+import { metresBetween } from './address'
+import { located } from './position.svelte'
+import {
+  CURRENT_PLACE,
+  type Condition,
+  type Forecast,
+  type Place,
+  type Position,
+} from './api/types'
 
 /* The forecast, for the dashboard and the dialog.
  *
@@ -18,6 +27,17 @@ import { CURRENT_PLACE, type Condition, type Forecast, type Place } from './api/
 
 /** Often enough to follow the hour, rarely enough to be free. */
 const REFRESH_MS = 10 * 60 * 1000
+
+/** The daemon caches forecasts per kilometre square, so past this the
+ *  car is under another one -- worth asking for without waiting for
+ *  the next ten-minute refresh. */
+const MOVED_METRES = 1000
+
+/** After a failed load, before moving may prompt another. Without it,
+ *  no signal would mean a retry on every position update -- once a
+ *  second while driving. A successful load needs no pause: the next
+ *  one waits for another kilometre anyway. */
+const RETRY_MS = 60 * 1000
 
 interface Store {
   /** Where the car is. What the dashboard shows, always -- whatever
@@ -60,6 +80,10 @@ export const weather = $state<Store>({
    showing, these are for deciding. */
 let hereLoading = false
 let selected = CURRENT_PLACE
+/** Where the forecast on the dashboard is for, and when it was last
+ *  asked for -- for deciding whether a move is worth a new one. */
+let hereAt: [number, number] | null = null
+let hereFailed = 0
 /** Bumped per request for a saved place, so a slow answer for a
  *  place already left is dropped rather than shown. */
 let ticket = 0
@@ -84,12 +108,15 @@ async function loadHere(refresh = false): Promise<void> {
   try {
     const found = await api.forecast(CURRENT_PLACE, refresh)
     weather.here = found
+    hereAt = [found.latitude, found.longitude]
+    hereFailed = 0
     if (forDialog()) {
       weather.forecast = found
       weather.fetched = Date.now()
       weather.error = ''
     }
   } catch (cause) {
+    hereFailed = Date.now()
     if (forDialog()) weather.error = message(cause)
   } finally {
     hereLoading = false
@@ -182,14 +209,32 @@ export async function loadPlaces(): Promise<void> {
 
 /**
  * Keep the current position's forecast fresh while a screen is
- * mounted.
+ * mounted: every ten minutes, and sooner once the car has driven
+ * out of the square the forecast was for.
  *
  * Returns a stop function, so an $effect can hand it back.
  */
 export function watch(interval = REFRESH_MS): () => void {
   loadHere()
   const timer = setInterval(() => loadHere(), interval)
-  return () => clearInterval(timer)
+
+  const stop = on('position', (data) => {
+    const reading = data as Position
+    if (!located(reading) || !hereAt) return
+    if (Date.now() - hereFailed < RETRY_MS) return
+    const moved = metresBetween(
+      hereAt[0],
+      hereAt[1],
+      reading.latitude,
+      reading.longitude,
+    )
+    if (moved > MOVED_METRES) loadHere()
+  })
+
+  return () => {
+    clearInterval(timer)
+    stop()
+  }
 }
 
 /* Note for anyone adding to this file: nothing reachable from watch()

@@ -213,6 +213,23 @@ class Address:
         return f'{self.latitude:.4f}, {self.longitude:.4f}'
 
     @property
+    def postal(self) -> str:
+        """Postcode and town, as a Swedish address writes them:
+        "857 40 Sundsvall"."""
+        return ' '.join(p for p in (self.postcode, self.town) if p)
+
+    @property
+    def full(self) -> str:
+        """
+        Street, postcode and town on one line: "Västra vägen 64, 857 40
+        Sundsvall". Whatever of it is known -- a motorway between
+        towns has no house number and often no postcode -- and the
+        short form when none of it is.
+        """
+        parts = [p for p in (self.name or self.street, self.postal) if p]
+        return ', '.join(parts) if parts else self.short
+
+    @property
     def label(self) -> str:
         return self.display_name or self.short
 
@@ -765,6 +782,51 @@ def moved_enough(latitude: float, longitude: float,
         threshold = move_threshold()
     return distance_metres(position[0], position[1],
                            latitude, longitude) >= threshold
+
+
+# How close the geocoder's last lookup must be to count as the address
+# here. About a block: further than that and the street may well be
+# another one.
+NEAR_METRES = 150.0
+
+
+async def address_here(latitude: float, longitude: float) -> Address | None:
+    """
+    The address of our own position, for a screen to show.
+
+    The geocoder's last lookup when it was made close by; otherwise
+    the cached answer for this block; otherwise one lookup, inside the
+    same per-minute budget the automatic geocoder uses. A screen that
+    asks every few minutes therefore costs a request only when the car
+    has moved to another block, and never more than the budget allows.
+
+    Kept as our current address when it is looked up, so the next
+    caller -- and `geocode current` -- finds it without asking.
+
+    None when there is no answer to be had: no signal, budget spent,
+    or nothing mapped here.
+    """
+    known = current()
+    position = current_position()
+    if known is not None and position is not None:
+        if distance_metres(position[0], position[1],
+                           latitude, longitude) <= NEAR_METRES:
+            return known
+
+    key = _cache_key(latitude, longitude)
+    cached = _cached(key)
+    if cached is None:
+        if auto_budget() <= 0:
+            return None
+        _spend_auto()
+
+    try:
+        address = cached or await reverse(latitude, longitude)
+    except Exception:
+        return None
+
+    _store_current(address, latitude, longitude)
+    return address
 
 
 async def update_current(latitude: float, longitude: float,

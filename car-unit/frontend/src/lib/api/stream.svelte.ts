@@ -38,6 +38,7 @@ const KNOWN = [
   'network',
   'map',
   'position',
+  'place',
 ] as const
 
 const handlers = new Map<string, Set<Handler>>()

@@ -11,6 +11,11 @@
   import type { CarLook, CarMapStatus } from '$lib/map/car'
   import { position, speedOf } from '$lib/position.svelte'
   import {
+    here as carPlace,
+    refresh as refreshPlace,
+    watch as watchPlace,
+  } from '$lib/place.svelte'
+  import {
     radio,
     refresh as refreshRadio,
     seek as seekRadio,
@@ -65,8 +70,43 @@
   /* Always where the car is. The forecast dialog can look at a saved
      place, but that is its own choice and never shows up here. */
   const forecast = $derived(weather.here)
+
+  /* Where the car is, by address -- street, postcode and town -- from
+     the daemon's 'place' event, so it changes as soon as the address
+     does rather than with the weather. Fetched once on opening, which
+     is also what has an address looked up when there is none. */
+  $effect(() => {
+    refreshPlace()
+    return watchPlace()
+  })
+
+  /** The address in two lines, as it is written on an envelope:
+   *  street, then postcode and town. The forecast's town alone until
+   *  there is an address. */
+  const placeLines = $derived.by((): [string, string] => {
+    const parts = carPlace.place?.details
+    if (!parts) return [carPlace.place?.address || forecast?.place || '', '']
+
+    const street =
+      parts.name ||
+      [parts.road, parts.house_number].filter(Boolean).join(' ')
+    /* The daemon's own order for the town: the most useful
+       settlement name the address has. */
+    const town =
+      parts.city || parts.municipality || parts.suburb || parts.county
+    const postal = [parts.postcode, town].filter(Boolean).join(' ')
+
+    /* A motorway between towns has no street to speak of; the town
+       then goes on the first line rather than leaving it empty. */
+    return street ? [street, postal] : [postal, '']
+  })
   const current = $derived(forecast?.current)
   const condition = $derived(current?.condition ?? 'unknown')
+  const temperature = $derived(
+    typeof current?.temperature === 'number'
+      ? Math.round(current.temperature)
+      : '—',
+  )
 
   /* Watched here rather than in the root layout: the clock it starts
      is only worth running while something is showing elapsed time,
@@ -177,21 +217,27 @@
       <div class="date">{date}</div>
     </div>
 
-    <!-- The whole block opens the forecast, rather than a separate
-         control: it is already the thing you would reach for. -->
-    <button class="where" onclick={() => (forecastOpen = true)}>
-      <span class="eyebrow">{forecast?.place ?? ''}</span>
-      <span class="weather">
+    <!-- The weather at the top, the address at the foot, level with
+         the clock and the date beside them. Only the weather opens the
+         forecast: it is the thing you would reach for, and the address
+         is something to read. -->
+    <div class="side">
+      <button
+        class="where"
+        aria-label="Weather: {temperature}°, {nameFor(condition)}. Open the forecast"
+        onclick={() => (forecastOpen = true)}
+      >
         <Icon name={iconFor(condition)} size={34} />
-        <span class="temp">
-          {current?.temperature === null ||
-          current?.temperature === undefined
-            ? '—'
-            : Math.round(current.temperature)}°
-        </span>
+        <span class="temp">{temperature}°</span>
+      </button>
+
+      <span class="eyebrow place">
+        <span>{placeLines[0]}</span>
+        {#if placeLines[1]}
+          <span>{placeLines[1]}</span>
+        {/if}
       </span>
-      <span class="eyebrow">{nameFor(condition)}</span>
-    </button>
+    </div>
   </Card>
 
   <div class="tiles">
@@ -349,14 +395,26 @@
     opacity: var(--dim-secondary);
   }
 
-  .where {
+  /* The card's full height, so the address can sit at its foot while
+     the weather stays at the top. */
+  .side {
     display: flex;
     flex-direction: column;
     align-items: flex-end;
-    gap: 6px;
+    justify-content: space-between;
+    gap: var(--spacing);
+    align-self: stretch;
+  }
+
+  /* Pulled out by its own padding, so the pressed background has room
+     around the icon and figure without moving them off the edge. */
+  .where {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-s);
     padding: var(--spacing-xs) var(--spacing-s);
     margin: calc(var(--spacing-xs) * -1) calc(var(--spacing-s) * -1);
-    text-align: right;
+    color: var(--text-dim);
     background: none;
     border: 0;
     border-radius: var(--radius-sm);
@@ -371,11 +429,15 @@
     outline-offset: -2px;
   }
 
-  .weather {
+  /* Two lines held close, so they read as one address rather than
+     two labels. */
+  .place {
     display: flex;
-    align-items: center;
-    gap: var(--spacing-s);
-    color: var(--text-dim);
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 3px;
+    line-height: 1.2;
+    text-align: right;
   }
 
   .temp {

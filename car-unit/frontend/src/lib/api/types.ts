@@ -202,13 +202,20 @@ export interface Place {
   latitude: number
   longitude: number
   altitude: number | null
-  /** Filled in by the geocoder when the place was saved. */
+  /** Filled in by the geocoder when the place was saved. For the
+   *  current position, the full line -- "Västra vägen 64, 857 40
+   *  Sundsvall" -- and empty until one has been looked up. */
   address: string
   /** Only on the current position: true when the GPS has no fix yet
    *  and this is where the car last had one. */
   last_known?: boolean
   /** When a last known position was recorded, in Unix seconds. */
   at?: number | null
+  /** Only on the current position: what it is based on, as the
+   *  'position' event has it. */
+  source?: Position['source']
+  /** Only on the current position: the address in parts. */
+  details?: Address | null
 }
 
 /** Reserved: wherever we are now, kept current as the car moves. */
@@ -297,7 +304,8 @@ export interface Forecast {
   current: Conditions | null
   hourly: Conditions[]
   daily: Day[]
-  /** Where this is the weather for. */
+  /** Where this is the weather for: a saved place's name, or the town
+   *  for the current position, or "Here". */
   place: string
 }
 

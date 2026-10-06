@@ -142,32 +142,66 @@ async def _autostart() -> None:
         log.info('autostart: radio on %.1f MHz', state_.frequency)
 
 
-async def _run_geocoder() -> None:
+# How often the place tracker looks at the position. Looking costs
+# nothing -- the reading is already there, taken by the position
+# watcher -- and only a real move past the geocoder's thresholds turns
+# into a request.
+PLACE_POLL = 5.0
+
+
+async def _watch_place() -> None:
     """
-    Keep the current address up to date as the car moves.
+    Keep the current address up to date, and publish it when it
+    changes.
 
-    Here rather than in its own service because Nominatim's rate
-    limit applies across the whole application: two processes would
-    each keep their own limiter and could exceed it between them.
+    Two jobs in one loop, because they share a position and a pace:
 
-    Off by default. It is a third-party service with a usage policy
-    attached, so it should be a deliberate choice:
+    Looking the address up as the car moves, when `geocoding.auto` is
+    on. Nominatim is a third-party service with a usage policy, so this
+    stays a deliberate choice -- the geocoder's distance thresholds and
+    its per-minute budget decide when a move is worth a request. Here
+    rather than in its own service because the rate limit applies
+    across the whole application.
 
         settings set geocoding.auto true
-    """
-    while True:
-        if not settings.get_bool('geocoding.auto', False):
-            await asyncio.sleep(60)
-            continue
 
+    Publishing a 'place' event whenever what the car's position is
+    called changes: a new address, an address no longer close enough
+    to count, or the fix being lost or found. With auto off, addresses
+    still arrive from lookups a screen asks for -- /places/current --
+    and are published from here the same way.
+
+    Uses the position watcher's latest reading rather than the GPS, so
+    the modem is read in one place.
+    """
+    published: dict | None = None
+
+    while True:
         try:
-            async for address in geocoding.watch():
-                log.info('location: %s', address.short)
+            reading = position.latest()
+            if position.located(reading):
+                if settings.get_bool('geocoding.auto', False):
+                    try:
+                        fresh = await geocoding.update_current(
+                            reading['latitude'], reading['longitude'])
+                        if fresh is not None:
+                            log.info('location: %s', fresh.short)
+                    except Exception as exc:
+                        # No signal, mostly. The address stays as it
+                        # was and the next move tries again.
+                        log.debug('geocoder: %s', exc)
+
+                described = position.describe(
+                    reading, position.address_for(reading))
+                if not position.same_place(described, published):
+                    published = described
+                    events.events.publish('place', described)
         except asyncio.CancelledError:
             raise
         except Exception:
-            log.exception('geocoder failed; restarting in 60s')
-            await asyncio.sleep(60)
+            log.exception('place watch failed')
+
+        await asyncio.sleep(PLACE_POLL)
 
 
 # How often the GPS is read to keep the last known position. Writes
@@ -433,7 +467,7 @@ async def lifespan(app: FastAPI):
 
     _supervisor = asyncio.create_task(_run_supervisor())
     _autostart_task = asyncio.create_task(_autostart())
-    _geocoder = asyncio.create_task(_run_geocoder())
+    _geocoder = asyncio.create_task(_watch_place())
     _audio_watch = asyncio.create_task(_watch_audio())
     _bluetooth_watch = asyncio.create_task(pairing.run())
     _media_watch = asyncio.create_task(_watch_media())
