@@ -555,19 +555,13 @@
    * opacity on the element: opacity fades everything drawn inside it,
    * so a scrim there would be faded too and buy nothing.
    *
-   * 35% over most of the picture, going solid only at the bottom
-   * edge where the text sits. */
+   * The picture as it is, edge to edge: the text carries its own
+   * backing in the frosted strip below rather than the picture being
+   * shaded for it. */
   .cover {
     position: absolute;
     inset: 0;
-    background-image:
-      linear-gradient(
-        to top,
-        var(--surface) 0%,
-        color-mix(in srgb, var(--surface) 35%, transparent) 45%,
-        color-mix(in srgb, var(--surface) 35%, transparent) 100%
-      ),
-      var(--art);
+    background-image: var(--art);
     background-size: cover;
     background-position: center;
   }
@@ -597,21 +591,29 @@
     position: relative;
   }
 
-  /* Over a picture rather than a flat colour, so the text carries its
-     own backing: a halo in the card colour, which is a hole punched
-     around the letters rather than a box drawn behind them.
-     
-     Both lines full strength. Dimming the artist to separate it from
-     the title works against a panel and not against artwork, where it
-     simply disappears; the size difference does that job. */
+  /* Over a picture: the labels and the buttons on a frosted strip,
+     the cover blurred behind it, so the text has an even backing
+     whatever the artwork is. Inset a little from the card's edges
+     rather than running to them, which makes it read as a panel on
+     the picture and not as the card's foot. The card colour at half
+     strength keeps a hint of the cover's own colour in it. */
+  .foot.over-art {
+    margin: 0 calc(10px - var(--pad)) calc(10px - var(--pad));
+    padding: 10px 10px 10px 14px;
+    background: color-mix(in srgb, var(--surface) 55%, transparent);
+    border: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
+    border-radius: calc(var(--radius) - 6px);
+    -webkit-backdrop-filter: blur(18px) saturate(1.3);
+    backdrop-filter: blur(18px) saturate(1.3);
+  }
+
+  /* Both lines full strength. Dimming the artist to separate it from
+     the title works against a panel and not over a blur of artwork,
+     where it all but disappears; the size difference does that job. */
   .over-art .title,
   .over-art .detail {
     color: var(--text);
     opacity: 1;
-    text-shadow:
-      0 1px 3px var(--surface),
-      0 0 10px var(--surface),
-      0 0 20px var(--surface);
   }
 
   /* The map tile: positioned and clipped like the media tile, with
@@ -630,11 +632,27 @@
 
   /* Faded in once it has drawn, so the tile never shows an empty
      grey box while the map is starting. */
+  /* Clipped to the card's corners itself, three ways over. The map
+     is a WebGL canvas in a GPU layer of its own, the fade makes this
+     another, and browsers skip a parent's rounded overflow clip on
+     layers like those -- the corners came out square.
+
+     - overflow with the radius, on this layer rather than the card;
+     - clip-path, which Chromium applies to the layer itself;
+     - a mask, which forces WebKit to draw the layer through the
+       rounded clip -- the long-standing fix for exactly this there.
+     Each covers an engine or a version the others miss. */
   .backdrop {
     position: absolute;
     inset: 0;
     opacity: 0;
     transition: opacity 0.4s ease;
+    border-radius: inherit;
+    overflow: hidden;
+    isolation: isolate;
+    clip-path: inset(0 round var(--radius));
+    -webkit-mask-image: -webkit-radial-gradient(white, black);
+    mask-image: linear-gradient(#000, #000);
   }
 
   .backdrop.shown {

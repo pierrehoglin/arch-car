@@ -211,8 +211,11 @@
 <CarMarker bind:element={carElement} {look} size={40} />
 
 <style>
+  /* Rounded like whatever it fills, so MapLibre's own overflow clip
+     -- the canvas's nearest -- cuts the corners too. */
   .car-map {
     position: absolute;
     inset: 0;
+    border-radius: inherit;
   }
 </style>

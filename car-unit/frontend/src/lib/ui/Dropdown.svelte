@@ -21,9 +21,22 @@
     /** Spoken name for the control. */
     label: string
     disabled?: boolean
+    /** Shorter and lighter, for a header rather than a form. */
+    slim?: boolean
+    /** Which edge of the button the list lines up with: the right by
+     *  default, for a control at the right edge of what it is in. */
+    align?: 'right' | 'center'
   }
 
-  let { options, value, onchange, label, disabled = false }: Props = $props()
+  let {
+    options,
+    value,
+    onchange,
+    label,
+    disabled = false,
+    slim = false,
+    align = 'right',
+  }: Props = $props()
 
   let open = $state(false)
   let root = $state<HTMLDivElement>()
@@ -73,6 +86,7 @@
 <div class="dropdown" bind:this={root}>
   <button
     class="trigger"
+    class:slim
     class:open
     {disabled}
     aria-haspopup="listbox"
@@ -87,7 +101,7 @@
   </button>
 
   {#if open}
-    <ul class="list" role="listbox" aria-label={label}>
+    <ul class="list" class:center={align === 'center'} role="listbox" aria-label={label}>
       <!-- By position: options are named by whoever made them, and
            nothing promises the labels are unique. -->
       {#each options as option, index (index)}
@@ -128,6 +142,14 @@
     background: var(--panel-2);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
+  }
+
+  .trigger.slim {
+    min-width: 140px;
+    height: 36px;
+    padding: 0 6px 0 var(--spacing-s);
+    font-size: 14px;
+    border-radius: 999px;
   }
 
   .trigger.open {
@@ -179,6 +201,12 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     box-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
+  }
+
+  .list.center {
+    right: auto;
+    left: 50%;
+    transform: translateX(-50%);
   }
 
   .option {

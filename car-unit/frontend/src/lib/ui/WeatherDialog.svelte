@@ -111,6 +111,35 @@
 </script>
 
 <Dialog {open} {onclose} title="Weather" width={700}>
+  <!-- Where the forecast is for, in the header: it decides everything
+       below it. Only with somewhere to choose. -->
+  {#snippet middle()}
+    {#if places.length > 1}
+      <div class="picker">
+        <Dropdown
+          slim
+          align="center"
+          label="Forecast for"
+          value={weather.place}
+          options={places.map((place) => ({
+            value: place.name,
+            label: place.label,
+          }))}
+          disabled={weather.loading}
+          onchange={(name) => choose(name)}
+        />
+        <!-- Beside the picker rather than over the readings: what is
+             being waited for is the place. Out of the flow, so the
+             picker stays in the middle. -->
+        {#if weather.loading}
+          <span class="loading">
+            <Spinner size={18} label="Loading the forecast" />
+          </span>
+        {/if}
+      </div>
+    {/if}
+  {/snippet}
+
   {#snippet children()}
     {#if weather.loading && !forecast}
       <div class="pending">
@@ -135,29 +164,6 @@
               <span class="says">{nameFor(now?.condition ?? 'unknown')}</span>
             </div>
           </div>
-
-          <!-- Where the forecast is for, beside what it says: the
-               current conditions are a short line, and the space to
-               their right was empty. Only with somewhere to choose. -->
-          {#if places.length > 1}
-            <div class="picker">
-              <!-- Beside the picker rather than over the readings:
-                   what is being waited for is the place. -->
-              {#if weather.loading}
-                <Spinner size={20} label="Loading the forecast" />
-              {/if}
-              <Dropdown
-                label="Forecast for"
-                value={weather.place}
-                options={places.map((place) => ({
-                  value: place.name,
-                  label: place.label,
-                }))}
-                disabled={weather.loading}
-                onchange={(name) => choose(name)}
-              />
-            </div>
-          {/if}
         </section>
 
         {#if stats.length}
@@ -254,22 +260,24 @@
   }
 
   .picker {
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-s);
-    flex-shrink: 0;
+    position: relative;
   }
 
-  /* Everything but the picker: the readings are the last place's
-     until the new ones arrive, while the picker -- and its spinner --
-     is the part saying what is happening. */
-  .readings > :is(section:not(.now), .source),
-  .now > :first-child {
+  .loading {
+    position: absolute;
+    top: 50%;
+    left: calc(100% + var(--spacing-s));
+    display: grid;
+    transform: translateY(-50%);
+  }
+
+  /* The readings are the last place's until the new ones arrive; the
+     picker in the header, and its spinner, say what is happening. */
+  .readings > :is(section, .source) {
     transition: opacity 160ms ease;
   }
 
-  .readings.stale > :is(section:not(.now), .source),
-  .readings.stale .now > :first-child {
+  .readings.stale > :is(section, .source) {
     opacity: 0.4;
     /* Nothing in here should be tappable while it describes somewhere
        else. */

@@ -22,6 +22,10 @@
     bare?: boolean
     children: Snippet
     footer?: Snippet
+    /** Something small in the middle of the header, between the title
+     *  and the close button: a control that says what the whole dialog
+     *  is showing, like the weather's place. */
+    middle?: Snippet
   }
 
   let {
@@ -33,6 +37,7 @@
     bare = false,
     children,
     footer,
+    middle,
   }: Props = $props()
 
   let element = $state<HTMLDialogElement>()
@@ -73,6 +78,12 @@
       {#if !bare}
         <header>
           <h2 id="dialog-title">{title}</h2>
+
+          <div class="middle">
+            {#if middle}
+              {@render middle()}
+            {/if}
+          </div>
 
           <!-- Hidden while something is running, alongside the
                backdrop and Escape being disabled: all three are the
@@ -134,15 +145,19 @@
     max-height: calc(100dvh - 120px);
   }
 
+  /* Three columns, the outer two sharing what is left equally, so
+     the middle is the middle of the dialog and not of whatever space
+     the title leaves. */
   header {
-    display: flex;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
     align-items: center;
-    justify-content: space-between;
     gap: var(--spacing);
     padding: var(--spacing-l) var(--spacing-l) var(--spacing-s);
   }
 
   .close {
+    justify-self: end;
     display: grid;
     place-items: center;
     width: 42px;
