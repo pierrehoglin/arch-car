@@ -94,6 +94,15 @@
         ),
   )
 
+  /* Enough columns for the presets to fit two rows, between four and
+     five. Four keeps the card the width of the band above it; five
+     widens it, so the chips stay the same size rather than shrinking
+     to make room. Past ten a third row starts, which is better than
+     chips too narrow for a station name. */
+  const presetColumns = $derived(
+    Math.min(5, Math.max(4, Math.ceil(radio.presets.length / 2))),
+  )
+
   const preset = $derived(
     radio.presets.find((p) => Math.abs(p.frequency - frequency) < 0.01),
   )
@@ -244,7 +253,11 @@
   </button>
 </div>
 
-<Card eyebrow="Presets" gap="s" class="preset-card">
+<Card
+  eyebrow="Presets"
+  gap="s"
+  class={presetColumns > 4 ? 'preset-card wide' : 'preset-card'}
+>
   <!-- Hold a preset to edit it; hold and drag to reorder. Tapping
        plays it. -->
   <Sortable
@@ -495,21 +508,33 @@
     outline-offset: 3px;
   }
 
-  /* The card is as wide as the band above it, so the two line up
-     rather than the presets floating at their own width. */
+  /* As wide as the band above it, so the two line up -- or wider,
+     when there are more presets than two rows of four can hold. See
+     presetColumns. */
   .tuner ~ :global(.preset-card) {
     width: 100%;
     max-width: 560px;
   }
 
-  /* Four columns rather than a wrapping row. With presets of very
-     different name lengths, wrapping gave three ragged rows; fixed
-     columns keep the chips a consistent size and the rows even.
-     
-     Sortable reads these as variables, since it owns the container. */
-  .preset-card :global(.presets) {
+  .tuner ~ :global(.preset-card.wide) {
+    max-width: 730px;
+  }
+
+  /* Fixed columns rather than a wrapping row. With presets of very
+     different name lengths, wrapping gave ragged rows; equal columns
+     keep the chips one size and the rows even.
+
+     Sortable reads these as variables, since it owns the container.
+     Reached through the tuner, like the card's width: the card class
+     sits on Card's own element, outside this page's styles, so
+     `.preset-card` alone matches nothing and Svelte drops the rule. */
+  .tuner ~ :global(.preset-card) :global(.presets) {
     --columns: repeat(4, 1fr);
     --gap: var(--spacing-s);
+  }
+
+  .tuner ~ :global(.preset-card.wide) :global(.presets) {
+    --columns: repeat(5, 1fr);
   }
 
   /* Presentational: Sortable's slot is the control, and carries the
