@@ -215,6 +215,30 @@ async def geocode_current() -> dict | None:
     return address.to_dict() if address else None
 
 
+def _here_label() -> str:
+    """
+    A name for the current position, without asking anyone.
+
+    The town from the last address the daemon knows -- the geocoder's,
+    when it runs, or the one kept with the last known position -- and
+    "Here" when there is none. Never a lookup of its own: the weather
+    is fetched every ten minutes, and a reverse geocode each time
+    would be a request the Nominatim policy does not cover.
+    """
+    address = ''
+    tracked = places.current()
+    if tracked is not None:
+        address = tracked.address
+    if not address:
+        last = places.last_known()
+        if last is not None:
+            address = last[0].address
+
+    # "Storgatan 1, Sundsvall" -- the town is the last part.
+    town = address.rsplit(',', 1)[-1].strip() if address else ''
+    return town or 'Here'
+
+
 async def places_list() -> list[dict]:
     return [p.to_dict() for p in places.saved()]
 

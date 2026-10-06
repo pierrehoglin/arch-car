@@ -37,6 +37,7 @@ const KNOWN = [
   'media',
   'network',
   'map',
+  'position',
 ] as const
 
 const handlers = new Map<string, Set<Handler>>()

@@ -488,3 +488,24 @@ export interface Book {
    *  PBAP. False means do not try rather than try and wait. */
   available: boolean
 }
+
+/** Where the car is, and what that is based on.
+ *
+ *  gps   a live fix
+ *  last  no fix now; where the car last had one (`at` says when)
+ *  pin   location.latitude/longitude are set and the GPS is ignored
+ *  none  nothing known at all -- the other fields are absent */
+export interface Position {
+  source: 'gps' | 'last' | 'pin' | 'none'
+  latitude?: number
+  longitude?: number
+  altitude?: number | null
+  speed_kmh?: number | null
+  /** Degrees clockwise from true north. Only meaningful moving: a
+   *  parked GPS reports whatever direction the noise suggests. */
+  heading?: number | null
+  hdop?: number | null
+  satellites?: number
+  /** Unix seconds of the reading. Null for a pin. */
+  at?: number | null
+}

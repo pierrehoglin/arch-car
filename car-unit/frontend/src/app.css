@@ -66,6 +66,9 @@
   --pink: #e05c8a;
   --danger: #ff8a80;
   --knob: #ffffff;
+  /* Behind a readout that floats over the map: the speed. Black
+     rather than the panel colour, so it stands off a dark map. */
+  --readout: #000000;
 }
 
 /* Day / LIGHT — a warm Nordic light variant. */
@@ -88,6 +91,7 @@
   --pink: #c23e6e;
   --danger: #c0392b;
   --knob: #ffffff;
+  --readout: #ffffff;
 }
 
 /* Night Panel — a calmer, near-monochrome instrument mode for driving in the
@@ -114,6 +118,7 @@
   --pink: #3a3120;
   --danger: #ff8a80;
   --knob: #ffffff;
+  --readout: #000000;
   --dim-secondary: 0.12;
 }
 

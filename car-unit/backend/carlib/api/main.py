@@ -35,7 +35,7 @@ from carlib.core import settings, state
 from carlib.core.errors import CarError, NotFoundError
 from carlib.api import events, routes
 from carlib.bluetooth.pairing import Pairing
-from carlib.location import geocoding, places
+from carlib.location import geocoding, places, position
 from carlib.navigation import tiles, download
 from carlib.radio import fm
 from carlib.system import audio, source
@@ -220,6 +220,37 @@ async def _remember_position() -> None:
                             fix.altitude, address)
         except Exception:
             log.exception('could not save the last known position')
+
+
+# How often the position is read for the map. The GPS service sets the
+# modem to refresh once a second, so reading faster finds nothing new,
+# and reading slower makes the car jump along the road.
+POSITION_POLL = 1.0
+
+
+async def _watch_position() -> None:
+    """
+    Publish where the car is, as it moves.
+
+    Polled: ModemManager can signal changes, but that subscription
+    dies with ModemManager, and the reason gps-supervise exists is that
+    ModemManager restarts. Published only when the reading would draw
+    differently, so a parked car is quiet.
+    """
+    last: dict | None = None
+
+    while True:
+        try:
+            reading = await position.read()
+            if not position.same(reading, last):
+                last = reading
+                events.events.publish('position', reading)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception('position watch failed')
+
+        await asyncio.sleep(POSITION_POLL)
 
 
 async def _watch_audio() -> None:
@@ -410,6 +441,7 @@ async def lifespan(app: FastAPI):
     _fm_watch = asyncio.create_task(_watch_fm())
 
     _position_memory = asyncio.create_task(_remember_position())
+    _position_watch = asyncio.create_task(_watch_position())
 
     # Map downloads report through the stream, so Settings > Map can
     # show progress -- and a screen opened halfway through picks it up
@@ -434,6 +466,7 @@ async def lifespan(app: FastAPI):
     events.events.shutdown()
 
     _position_memory.cancel()
+    _position_watch.cancel()
 
     for task in (_autostart_task, _geocoder, _audio_watch,
                  _bluetooth_watch, _media_watch, _network_watch,
@@ -796,6 +829,16 @@ async def get_geocode_reverse(lat: float, lon: float,
 @api.get('/geocode/current')
 async def get_geocode_current() -> dict | None:
     return await routes.geocode_current()
+
+
+@api.get('/position')
+async def get_position() -> dict:
+    """
+    Where the car is, and what that is based on: gps, last (no fix
+    now, where it last had one), pin, or none. The same payload the
+    'position' event carries, for a screen that cannot wait for it.
+    """
+    return await position.read()
 
 
 @api.get('/places')

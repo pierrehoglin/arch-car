@@ -10,6 +10,15 @@
   import { RequestFailed } from '$lib/api/client'
   import { mapStyle, registerProtocol } from '$lib/map/style'
   import { isDark } from '$lib/settings.svelte'
+  import CarMarker from '$lib/map/CarMarker.svelte'
+  import { Car, type CarLook } from '$lib/map/car'
+  import {
+    located,
+    position,
+    refresh as refreshPosition,
+    speedOf,
+    watch as watchPosition,
+  } from '$lib/position.svelte'
   import type { Address } from '$lib/api/types'
 
   /* The map: pan, zoom and rotate, never tilted. Opens north up; a
@@ -17,7 +26,8 @@
      chrome over it -- search, speed, controls -- was laid out first
      and stays as it was. */
 
-  /** Where the map opens, until there is a GPS position to open on. */
+  /** Where the map opens when nothing at all is known about where
+   *  the car is -- no fix, nothing remembered, no pin. */
   const START = {
     center: [18.0686, 59.3293] as [number, number],
     zoom: 12,
@@ -33,6 +43,24 @@
    *  little slack so a border town is not pinned to the screen edge;
    *  not so much that the map can be lost in empty background. */
   const BOUNDS_SLACK = 1.5
+
+  /** Zoom for the car's surroundings: streets with their names. */
+  const NEAR = 15
+
+  /** The car's marker element, drawn by CarMarker; and what moves
+   *  it, once there is a map. Plain, like the map. */
+  let carElement = $state<HTMLDivElement>()
+  let car: Car | undefined
+  let look = $state<CarLook>({ source: 'none', pointing: false })
+
+  /** Keeping the car in the middle of the screen. Starts on when
+   *  the map opens on the car; dragging the map turns it off, and
+   *  the locate button turns it back on. */
+  let following = $state(false)
+
+  /** Whether anyone has moved the map by hand since it opened. Until
+   *  they have, a first fix arriving late takes the map to it. */
+  let touched = false
 
   let container = $state<HTMLDivElement>()
 
@@ -69,9 +97,10 @@
     let cancelled = false
     let created: MapLibre | undefined
 
-    mapApi
-      .status()
-      .then((info) => {
+    /* The position alongside the status, so the map opens on the
+       car rather than opening somewhere and then flying to it. */
+    Promise.all([mapApi.status(), refreshPosition()])
+      .then(([info, reading]) => {
         if (cancelled) return
 
         if (!info.available) {
@@ -85,11 +114,15 @@
         flavour = dark
         localLabels = info.labels.available
 
+        const here = located(reading)
+          ? ([reading.longitude, reading.latitude] as [number, number])
+          : null
+
         created = new MapLibre({
           container: element,
           style: mapStyle(dark, localLabels),
-          center: START.center,
-          zoom: START.zoom,
+          center: here ?? START.center,
+          zoom: here ? NEAR : START.zoom,
           minZoom: 4,
           /* The archive stops at 15; beyond it MapLibre stretches the
              last level, which stays sharp because it is vectors. */
@@ -111,6 +144,21 @@
         created.on('rotate', () => {
           bearing = created?.getBearing() ?? 0
         })
+
+        /* Only a drag -- a person moving the map. Zooming keeps the
+           car in the middle, which is what zooming while following
+           should do. */
+        created.on('dragstart', () => {
+          touched = true
+          following = false
+        })
+
+        if (carElement) {
+          const moving = new Car(carElement, (next) => (look = next))
+          moving.attach(created)
+          moving.onmove = (at, first) => follow(at, first)
+          car = moving
+        }
 
         created.on('load', () => {
           if (!cancelled) ready = true
@@ -159,10 +207,45 @@
       cancelled = true
       ready = false
       flavour = null
+      car?.remove()
+      car = undefined
       created?.remove()
       map = undefined
     }
   })
+
+  /* The stream, for as long as the screen is open. */
+  $effect(() => watchPosition())
+
+  /* Each reading, once there is a map to put it on. untrack: what
+     the car and follow() touch is their own business, and reading
+     `following` in here would re-run this whenever the locate button
+     is pressed. */
+  $effect(() => {
+    const reading = position.reading
+    if (!ready) return
+    untrack(() => car?.update(reading))
+  })
+
+  function follow(at: [number, number], first: boolean): void {
+    if (!map) return
+
+    if (first) {
+      /* A fix arriving after the map opened somewhere else -- the GPS
+         finding its satellites -- takes the map to the car, unless
+         someone has already moved it. */
+      if (!touched) {
+        following = true
+        map.jumpTo({ center: at, zoom: Math.max(map.getZoom(), NEAR) })
+      }
+      return
+    }
+
+    /* Not while the map is already moving -- a zoom in progress, or
+       fingers on it. Jumping would cut the zoom off halfway; the car
+       is put back in the middle on the next frame after it ends. */
+    if (following && !map.isMoving()) map.jumpTo({ center: at })
+  }
 
   /* Day and Night. The flavour is a different set of paint values on
      the same layers, so MapLibre diffs it in place -- no flash, and
@@ -176,7 +259,23 @@
 
   const zoomIn = () => map?.zoomIn()
   const zoomOut = () => map?.zoomOut()
-  const backToStart = () => map?.easeTo({ ...START, duration: 600 })
+
+  /** To the car, and keep it there. With nothing known about where
+   *  the car is, back to where the map opened. */
+  function locate(): void {
+    if (!map) return
+    const reading = position.reading
+    if (!located(reading)) {
+      map.easeTo({ ...START, duration: 600 })
+      return
+    }
+    following = true
+    map.easeTo({
+      center: car?.drawn ?? [reading.longitude, reading.latitude],
+      zoom: Math.max(map.getZoom(), NEAR),
+      duration: 600,
+    })
+  }
   const faceNorth = () => map?.easeTo({ bearing: 0, duration: 400 })
 
   const turned = $derived(Math.abs(bearing) > TURNED)
@@ -193,7 +292,8 @@
   let searching = $state(false)
   let chosen = $state<Address | null>(null)
 
-  const speed = 40
+  /** Only from a live fix -- see speedOf. */
+  const speed = $derived(speedOf(position.reading))
 
   /* Debounced, and the result of a stale request is thrown away.
      Without the second part a slow reply for "kun" can land after a
@@ -250,6 +350,8 @@
 
 <div class="map">
   <div class="canvas" bind:this={container}></div>
+
+  <CarMarker bind:element={carElement} {look} />
 
   {#if problem}
     <div class="surface">
@@ -315,7 +417,7 @@
   </div>
 
   <div class="speed">
-    <span class="figure">{speed}</span>
+    <span class="figure">{speed ?? '–'}</span>
     <span class="unit">km/h</span>
   </div>
 
@@ -342,13 +444,16 @@
         </svg>
       </button>
     {/if}
-    <!-- Back to where the map opened, for now. Becomes "centre on
-         the car" once there is a position. -->
+    <!-- To the car, and follow it. Hollow while following -- it is
+         already doing what it does -- and filled once the map has
+         been dragged away, which is when it is worth pressing. -->
     <button
       class="control primary"
-      aria-label="Back to start"
+      class:following
+      aria-label="Follow the car"
+      aria-pressed={following}
       disabled={!ready}
-      onclick={backToStart}
+      onclick={locate}
     >
       <Icon name="crosshair" size={22} />
     </button>
@@ -594,6 +699,8 @@
     cursor: default;
   }
 
+  /* In a circle of its own, white by day and black by night, so it
+     reads over whatever part of the map is under it. */
   .speed {
     position: absolute;
     top: 18px;
@@ -601,6 +708,14 @@
     display: flex;
     flex-direction: column;
     align-items: center;
+    width: 82px;
+    height: 82px;
+    justify-content: center;
+    border-radius: 50%;
+    background: var(--readout);
+    /* A light shadow so the circle has an edge where the map under
+       it is close to its own colour -- white on a pale Day map. */
+    box-shadow: 0 1px 4px rgb(0 0 0 / 0.3);
     line-height: 1;
   }
 
@@ -653,10 +768,18 @@
     border-color: transparent;
   }
 
-  /* The north half in the accent, so which end is which reads
-     without a letter on it. */
+  .control.primary.following {
+    color: var(--accent);
+    background: color-mix(in srgb, var(--bar) 88%, transparent);
+    border-color: var(--accent);
+  }
+
+  /* The north half red, as on any compass, so which end is which
+     reads without a letter on it. Fixed rather than the accent: red
+     for north is a convention, and it should not change with the
+     ambient colour or the theme. */
   .compass .north {
-    fill: var(--accent);
+    fill: #e0322b;
   }
 
   .compass .south {

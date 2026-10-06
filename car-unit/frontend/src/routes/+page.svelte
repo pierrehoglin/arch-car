@@ -7,6 +7,9 @@
   import { coverFor } from '$lib/covers'
   import { logoForPi, nameForPi } from '$lib/stations'
   import { isDark } from '$lib/settings.svelte'
+  import CarMap from '$lib/map/CarMap.svelte'
+  import type { CarLook, CarMapStatus } from '$lib/map/car'
+  import { position, speedOf } from '$lib/position.svelte'
   import {
     radio,
     refresh as refreshRadio,
@@ -134,6 +137,33 @@
 
   const playPause = () =>
     onAir ? toggleRadio() : track && toggle(track.source)
+
+  /* The map tile: a live map behind it once there is one to show,
+     and the plain link it always was when there is not. */
+  let mapStatus = $state<CarMapStatus>('loading')
+  let carLook = $state<CarLook>({ source: 'none', pointing: false })
+  const mapShown = $derived(mapStatus === 'ready')
+
+  /** The same readout as the map screen's corner. */
+  const speed = $derived(speedOf(position.reading))
+
+  /** The tile's spoken name: what the screen shows as a map and a
+   *  marker, in words. */
+  const whereabouts = $derived.by(() => {
+    if (mapStatus === 'unavailable') return 'No offline map installed'
+    switch (carLook.source) {
+      case 'gps':
+        return speed !== null && speed >= 1
+          ? `Live position, ${speed} km/h`
+          : 'Live position'
+      case 'last':
+        return 'Last known position · waiting for GPS'
+      case 'pin':
+        return 'Pinned position'
+      default:
+        return 'Waiting for GPS'
+    }
+  })
 </script>
 
 <div class="dashboard">
@@ -249,15 +279,35 @@
       </div>
     </Card>
 
-    <Card href="/map" eyebrow="Navigation" justify="between">
+    <!-- The map under the whole tile, centred on the car, like the
+         cover in the tile beside it. Not interactive: the tile is one
+         target, and the map screen is where the map is used. -->
+    <Card
+      href="/map"
+      justify="end"
+      class={mapShown ? 'navigation live' : 'navigation'}
+    >
+      <!-- Speed top right and the licence line bottom right, where
+           the map screen has them, so the tile reads as a small copy
+           of it. Inside the backdrop: both belong to the map, and
+           appear with it. -->
+      <div class="backdrop" class:shown={mapShown} aria-hidden="true">
+        <CarMap bind:status={mapStatus} bind:look={carLook} />
+        <div class="speed">
+          <span class="speed-figure">{speed ?? '–'}</span>
+          <span class="speed-unit">km/h</span>
+        </div>
+        <span class="osm">© OpenStreetMap</span>
+      </div>
+
+      <!-- Spoken, since the tile has no visible words to be its name.
+           Whether the position is live shows on the car itself: the
+           marker is grey when it is not. -->
       <div class="foot">
         <span class="thumb accent">
           <Icon name="map" size={26} />
         </span>
-        <span class="labels">
-          <span class="title">Open map</span>
-          <span class="detail">Offline vector map · live position</span>
-        </span>
+        <span class="spoken">Open map. {whereabouts}</span>
       </div>
     </Card>
   </div>
@@ -489,6 +539,91 @@
       0 1px 3px var(--surface),
       0 0 10px var(--surface),
       0 0 20px var(--surface);
+  }
+
+  /* The map tile: positioned and clipped like the media tile, with
+     the content above the map for the same reason. */
+  .tiles :global(.navigation) {
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* z-index as well as position: the map is positioned too and comes
+     after the eyebrow, so without it the map would paint over it. */
+  .tiles :global(.navigation) > :global(*:not(.backdrop)) {
+    position: relative;
+    z-index: 1;
+  }
+
+  /* Faded in once it has drawn, so the tile never shows an empty
+     grey box while the map is starting. */
+  .backdrop {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    transition: opacity 0.4s ease;
+  }
+
+  .backdrop.shown {
+    opacity: 1;
+  }
+
+  /* As on the map screen, a little smaller for the tile. Full
+     brightness: it is read at a glance, like the clock. */
+  .speed {
+    position: absolute;
+    top: var(--spacing);
+    right: var(--spacing);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 72px;
+    height: 72px;
+    justify-content: center;
+    border-radius: 50%;
+    background: var(--readout);
+    /* A light shadow so the circle has an edge where the map under
+       it is close to its own colour -- white on a pale Day map. */
+    box-shadow: 0 1px 4px rgb(0 0 0 / 0.3);
+    line-height: 1;
+  }
+
+  .speed-figure {
+    font-family: var(--font-display);
+    font-size: 30px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+  }
+
+  .speed-unit {
+    margin-top: 2px;
+    font-family: var(--font-display);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    opacity: var(--dim-secondary);
+  }
+
+  /* The tile's name for a screen reader, now that it shows none. */
+  .spoken {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  /* Required by the ODbL licence the map data is under. */
+  .osm {
+    position: absolute;
+    right: var(--spacing);
+    bottom: var(--spacing-s);
+    font-size: 10px;
+    color: var(--text-faint);
   }
 
   .labels-link:focus-visible {
