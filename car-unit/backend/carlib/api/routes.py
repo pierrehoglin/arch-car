@@ -44,6 +44,11 @@ def status_for(exc: Exception) -> int:
     Walks the class hierarchy so a subclass added later still maps
     sensibly rather than falling to 500.
     """
+    # An exception that knows its own status says so -- see PlanFailed.
+    own = getattr(exc, 'status', None)
+    if isinstance(own, int):
+        return own
+
     for cls in type(exc).__mro__:
         if cls in STATUS:
             return STATUS[cls]
@@ -58,6 +63,9 @@ def error_body(exc: Exception) -> dict:
     hint = getattr(exc, 'hint', '')
     if hint:
         body['hint'] = hint
+    reason = getattr(exc, 'reason', '')
+    if reason:
+        body['reason'] = reason
     return body
 
 
@@ -324,6 +332,89 @@ async def navigate_route(points: list[tuple[float, float]],
                          costing: str | None = None) -> dict:
     result = await routing.route(points, costing=costing)
     return result.to_dict()
+
+
+class PlanFailed(CarError):
+    """
+    Why a route could not be planned, in a form a screen can act on.
+
+    Three reasons, each its own status so the frontend can tell them
+    apart without reading the message:
+
+        position  409  where the car is is not known yet
+        no_route  422  the router found no road to the place
+        offline   503  the router could not be reached
+    """
+
+    STATUSES = {'position': 409, 'no_route': 422, 'offline': 503}
+
+    def __init__(self, reason: str, message: str):
+        self.reason = reason
+        self.status = self.STATUSES.get(reason, 400)
+        super().__init__(message)
+
+
+# The last plan, kept for step 3: starting guidance uses it rather than
+# asking the router again. Every route offered, with its full turn
+# list -- the screen only gets the lines and the totals.
+_planned: dict = {}
+
+
+def planned() -> dict:
+    """The last plan: start, destination, stops and every route."""
+    return _planned
+
+
+def _line(route) -> list[list[float]]:
+    """The route's shape as GeoJSON wants it: [lon, lat], to about a
+    metre -- finer only makes the payload bigger."""
+    return [[round(lon, 5), round(lat, 5)] for lat, lon in route.shape]
+
+
+async def navigate_plan(destination: tuple[float, float],
+                        stops: list[tuple[float, float]] | None = None
+                        ) -> dict:
+    """
+    A route from where the car is to the destination, through any stops
+    in the order given -- and up to two other ways when there are no
+    stops.
+
+    The start is the daemon's own position, as the map shows it: live,
+    last known or pinned. Asking the screen for it would only add a
+    second idea of where the car is.
+    """
+    from carlib.location import position
+
+    reading = position.latest() or await position.read()
+    if not position.located(reading):
+        raise PlanFailed('position', "the car's position is not known yet")
+
+    start = (reading['latitude'], reading['longitude'])
+    points = [start, *(stops or []), destination]
+
+    try:
+        found = await routing.plan(points)
+    except NotFoundError as exc:
+        raise PlanFailed('no_route', str(exc)) from exc
+    except NotAvailableError as exc:
+        raise PlanFailed('offline', str(exc).splitlines()[0]) from exc
+
+    _planned.clear()
+    _planned.update({
+        'start': start,
+        'destination': destination,
+        'stops': list(stops or []),
+        'routes': found,
+    })
+
+    return {
+        'start': {'latitude': start[0], 'longitude': start[1]},
+        'routes': [{
+            'distance': round(r.distance_metres),
+            'time': round(r.time),
+            'shape': _line(r),
+        } for r in found],
+    }
 
 
 async def navigate_match(points: list[tuple[float, float]],

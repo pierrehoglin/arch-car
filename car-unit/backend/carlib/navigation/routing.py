@@ -161,6 +161,48 @@ async def route(points: list[tuple[float, float]],
     return result
 
 
+# How many other ways to the destination to ask for. Valhalla returns
+# them only for routes with no waypoints in between.
+PLAN_ALTERNATES = 2
+
+
+async def plan(points: list[tuple[float, float]],
+               costing: str | None = None,
+               alternates: int = PLAN_ALTERNATES,
+               units: str = 'kilometers') -> list[Route]:
+    """
+    The best route through the points, then any alternatives.
+
+    route() with the alternatives kept: Valhalla returns them beside
+    the main trip, each wrapped the same way, so they parse alike.
+    Alternatives are only asked for between two points -- Valhalla
+    does not offer them through waypoints, and asking anyway gets an
+    error rather than a route.
+    """
+    if len(points) < 2:
+        raise NotFoundError('route', 'fewer than two points',
+                            ['a start and a destination are needed'])
+
+    body = {
+        'locations': [{'lat': round(lat, 6), 'lon': round(lon, 6)}
+                      for lat, lon in points],
+        'costing': costing or default_costing(),
+        'directions_options': {'units': units},
+    }
+    if alternates and len(points) == 2:
+        body['alternates'] = int(alternates)
+
+    payload = await _post('/route', body)
+
+    found = [parse_route(payload)]
+    for other in payload.get('alternates') or []:
+        if isinstance(other, dict):
+            found.append(parse_route(other))
+    for each in found:
+        each.costing = body['costing']
+    return found
+
+
 async def match(points: list[tuple[float, float]],
                 costing: str | None = None,
                 units: str = 'kilometers') -> Route:

@@ -662,6 +662,11 @@ class RouteBody(BaseModel):
     costing: str | None = None
 
 
+class PlanBody(BaseModel):
+    destination: Point
+    stops: list[Point] = []
+
+
 class PlaceBody(BaseModel):
     name: str
     latitude: float | None = None
@@ -1246,6 +1251,21 @@ async def post_navigate_route(body: RouteBody) -> dict:
     """A route through two or more points."""
     return await routes.navigate_route(
         [(p.lat, p.lon) for p in body.points], body.costing)
+
+
+@api.post('/navigate/plan')
+async def post_navigate_plan(body: PlanBody) -> dict:
+    """
+    A route from the car to the destination, through any stops, with
+    up to two alternatives when there are none. Distances in metres,
+    times in seconds, shapes as [lon, lat] for GeoJSON.
+
+    Fails with 409 when the car's position is not known, 422 when no
+    road leads there, 503 when the router cannot be reached.
+    """
+    return await routes.navigate_plan(
+        (body.destination.lat, body.destination.lon),
+        [(p.lat, p.lon) for p in body.stops])
 
 
 @api.post('/navigate/match')

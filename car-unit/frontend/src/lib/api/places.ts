@@ -21,6 +21,14 @@ export const search = (query: string, limit = 5) =>
     query: { q: query, limit },
   })
 
+/** The address at a point. Cached by the daemon to about a city
+ *  block, and a request someone made by placing a pin -- which the
+ *  Nominatim policy permits. */
+export const reverse = (latitude: number, longitude: number) =>
+  request<Address>('/geocode/reverse', {
+    query: { lat: latitude, lon: longitude },
+  })
+
 /** Places that have been saved, by name. */
 export const saved = () => request<Place[]>('/places')
 

@@ -61,6 +61,8 @@
   import IconHome from '~icons/tabler/home'
   import IconLocate from '~icons/tabler/current-location'
   import IconMap from '~icons/tabler/map'
+  import IconMapPin from '~icons/tabler/map-pin'
+  import IconDirections from '~icons/tabler/directions'
   import IconMinus from '~icons/tabler/minus'
   import IconMusic from '~icons/tabler/music'
   import IconPhone from '~icons/tabler/phone'
@@ -142,6 +144,8 @@
     heading: IconHeading,
     home: IconHome,
     map: IconMap,
+    pin: IconMapPin,
+    directions: IconDirections,
     media: IconMusic,
     next: IconNext,
     note: IconMusic,
