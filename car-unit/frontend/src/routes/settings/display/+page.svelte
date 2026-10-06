@@ -2,7 +2,6 @@
   import Card from '$lib/ui/Card.svelte'
   import Row from '$lib/ui/Row.svelte'
   import Segmented from '$lib/ui/Segmented.svelte'
-  import Slider from '$lib/ui/Slider.svelte'
   import Swatches from '$lib/ui/Swatches.svelte'
   import { display, setAmbient, setTheme } from '$lib/settings.svelte'
   import type { Theme } from '$lib/types'
@@ -18,15 +17,6 @@
       ]}
       value={display.theme}
       onchange={(v: Theme) => setTheme(v)}
-    />
-  </Row>
-
-  <Row title="Brightness">
-    <Slider
-      label="Brightness"
-      readout="{display.brightness}%"
-      value={display.brightness}
-      onchange={(v) => (display.brightness = v)}
     />
   </Row>
 

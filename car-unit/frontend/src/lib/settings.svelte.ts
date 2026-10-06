@@ -9,9 +9,8 @@ import type { Theme, ThemeAttr } from './types'
  * audio store which the daemon feeds.
  *
  * The theme and the accent are stored by the daemon, under `ui.theme`
- * and `ui.ambient`. The rest of what is here is not: Night Panel is
- * a switch rather than a preference, and brightness will come from
- * the backlight when there is one.
+ * and `ui.ambient`. Night Panel is not: it is a switch rather than a
+ * preference.
  */
 
 /** Keys the daemon holds for this store. */
@@ -27,14 +26,12 @@ interface Display {
    *  over CAN rather than out of a config file. */
   nightPanel: boolean
   ambient: string
-  brightness: number
 }
 
 export const display = $state<Display>({
   theme: 'night',
   nightPanel: false,
   ambient: '#d8b146',
-  brightness: 72,
 })
 
 /* Until the stored values have arrived. Writing before then would
