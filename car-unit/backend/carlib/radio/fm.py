@@ -1061,7 +1061,34 @@ async def play(station: Station | float | str | None = None,
                  'using it, and that sox and redsea are installed. '
                  'Try rds=False to rule out redsea.')
 
+    await _clear_remembered_mute()
     return await status()
+
+
+async def _clear_remembered_mute() -> None:
+    """
+    Unmute a pipeline that has just started.
+
+    A fresh stream should start audible, but WirePlumber remembers the
+    mute of every stream by its name and puts it back when a stream of
+    that name appears again. Pausing mutes ours, so a radio that was
+    paused when it stopped -- by the supervisor, the daemon stopping,
+    a power cut -- came back muted on the next start, while the state
+    file said it was not. Play then saw nothing to resume, and the only
+    way out was pause and play again.
+
+    Said explicitly rather than trusted, because the remembered value
+    lives outside carlib and outlasts every restart of it. Also caches
+    the node id, which the next pause would look up anyway.
+
+    Not fatal when the stream cannot be found: the radio is running,
+    and a failure to mute it later says so where it matters.
+    """
+    try:
+        node_id = await _resolve_node(force=True)
+        await pipewire.set_mute(node_id, False)
+    except (NotAvailableError, NotFoundError):
+        pass
 
 
 # --- Band scanning ---------------------------------------------------------
