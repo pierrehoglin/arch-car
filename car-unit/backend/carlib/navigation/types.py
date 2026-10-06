@@ -158,6 +158,34 @@ class Route:
             'costing': self.costing,
         }
 
+    @classmethod
+    def from_dict(cls, data: dict) -> 'Route':
+        """
+        The reverse of to_dict, for a route kept on disk -- see
+        navigation.session, which saves the route being driven so it
+        can be picked up again after the car has been off.
+        """
+        fields = Maneuver.__dataclass_fields__
+        legs = []
+        for raw in data.get('legs') or []:
+            legs.append(Leg(
+                shape=[(float(p[0]), float(p[1]))
+                       for p in raw.get('shape') or []],
+                maneuvers=[Maneuver(**{k: v for k, v in m.items()
+                                       if k in fields})
+                           for m in raw.get('maneuvers') or []],
+                distance=float(raw.get('distance', 0.0) or 0.0),
+                time=float(raw.get('time', 0.0) or 0.0),
+            ))
+        return cls(
+            legs=legs,
+            distance=float(data.get('distance', 0.0) or 0.0),
+            time=float(data.get('time', 0.0) or 0.0),
+            summary=str(data.get('summary', '')),
+            units=str(data.get('units', 'kilometers')),
+            costing=str(data.get('costing', 'auto')),
+        )
+
     @property
     def shape(self) -> list[tuple[float, float]]:
         """Every point, legs joined end to end."""

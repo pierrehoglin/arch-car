@@ -20,6 +20,8 @@ const SOURCE = 'trip'
 
 /** The grey lines, for tapping one to choose it. */
 export const ALTERNATIVES = 'trip-alternatives'
+/** What has been driven, while navigating: faded under the rest. */
+const DRIVEN = 'trip-driven'
 const CASING = 'trip-casing'
 const LINE = 'trip-line'
 
@@ -51,6 +53,17 @@ function ensure(map: MapLibre): void {
   const labels = map.getStyle().layers.find((l) => l.type === 'symbol')?.id
   const round = { 'line-join': 'round', 'line-cap': 'round' } as const
 
+  map.addLayer(
+    {
+      id: DRIVEN,
+      type: 'line',
+      source: SOURCE,
+      filter: ['==', ['get', 'driven'], true],
+      layout: round,
+      paint: { 'line-width': 7, 'line-opacity': 0.35 },
+    },
+    labels,
+  )
   map.addLayer(
     {
       id: ALTERNATIVES,
@@ -98,10 +111,13 @@ export function drawRoutes(
   element: HTMLElement,
   options: RouteOption[],
   chosen: number,
+  driven: [number, number][] = [],
 ): void {
   ensure(map)
 
   const paint = colours(element)
+  /* The route's own colour, faded: grey read as one more road. */
+  map.setPaintProperty(DRIVEN, 'line-color', paint.accent)
   map.setPaintProperty(ALTERNATIVES, 'line-color', paint.alternative)
   map.setPaintProperty(CASING, 'line-color', paint.casing)
   map.setPaintProperty(LINE, 'line-color', paint.accent)
@@ -114,12 +130,42 @@ export function drawRoutes(
   const source = map.getSource(SOURCE) as GeoJSONSource
   source.setData({
     type: 'FeatureCollection',
-    features: order.map(({ option, index }) => ({
-      type: 'Feature',
-      properties: { index, chosen: index === chosen },
-      geometry: { type: 'LineString', coordinates: option.shape },
-    })),
+    features: [
+      ...(driven.length > 1
+        ? [
+            {
+              type: 'Feature' as const,
+              properties: { driven: true },
+              geometry: { type: 'LineString' as const, coordinates: driven },
+            },
+          ]
+        : []),
+      ...order.map(({ option, index }) => ({
+        type: 'Feature' as const,
+        properties: { index, chosen: index === chosen },
+        geometry: { type: 'LineString' as const, coordinates: option.shape },
+      })),
+    ],
   })
+}
+
+/**
+ * A route split where the car is on it: what has been driven, and
+ * what is left. `index` is the segment the car is on and `at` its
+ * place on that segment, as the daemon reports them.
+ */
+export function splitAt(
+  shape: [number, number][],
+  index: number,
+  at: [number, number] | null,
+): { driven: [number, number][]; ahead: [number, number][] } {
+  if (shape.length < 2) return { driven: [], ahead: shape }
+  const i = Math.max(0, Math.min(index, shape.length - 2))
+  const point = at ?? shape[i]
+  return {
+    driven: [...shape.slice(0, i + 1), point],
+    ahead: [point, ...shape.slice(i + 1)],
+  }
 }
 
 /** The box around a route and anything else that should be in view. */

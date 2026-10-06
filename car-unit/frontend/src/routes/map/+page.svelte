@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { untrack } from 'svelte'
+  import { tick, untrack } from 'svelte'
   import { Map as MapLibre, Marker } from 'maplibre-gl'
   import 'maplibre-gl/dist/maplibre-gl.css'
   import Icon from '$lib/Icon.svelte'
@@ -14,7 +14,25 @@
   import DestinationPin from '$lib/map/DestinationPin.svelte'
   import PinCard from '$lib/map/PinCard.svelte'
   import RouteCard from '$lib/map/RouteCard.svelte'
-  import { ALTERNATIVES, boundsOf, drawRoutes } from '$lib/map/routeLines'
+  import NavigationCard from '$lib/map/NavigationCard.svelte'
+  import TurnBanner from '$lib/map/TurnBanner.svelte'
+  import {
+    ALTERNATIVES,
+    boundsOf,
+    drawRoutes,
+    splitAt,
+  } from '$lib/map/routeLines'
+  import {
+    addStop as navAddStop,
+    nav,
+    navigating,
+    onRoute,
+    turnShown,
+    refresh as refreshNav,
+    setDestination as navSetDestination,
+    start as startNav,
+    watch as watchNav,
+  } from '$lib/navigation.svelte'
   import { TripMarkers } from '$lib/map/tripMarkers'
   import {
     addStop,
@@ -100,6 +118,13 @@
    *  they have, a first fix arriving late takes the map to it. */
   let touched = false
 
+  /** A finger or the mouse is down on the map. Plain, read only by
+   *  follow(): MapLibre's jumpTo stops every gesture in progress, and
+   *  the car moves on every frame while driving, so jumping to it under
+   *  a finger cancelled the pan before it began -- the map would not
+   *  move, and lifting the finger read as a tap. */
+  let pressed = false
+
   let container = $state<HTMLDivElement>()
 
   /* Plain, not $state: MapLibre owns its own state, and proxying the
@@ -134,6 +159,12 @@
 
     let cancelled = false
     let created: MapLibre | undefined
+
+    const press = () => (pressed = true)
+    const release = () => (pressed = false)
+    element.addEventListener('pointerdown', press, true)
+    window.addEventListener('pointerup', release, true)
+    window.addEventListener('pointercancel', release, true)
 
     /* The position alongside the status, so the map opens on the
        car rather than opening somewhere and then flying to it. */
@@ -264,6 +295,10 @@
       })
 
     return () => {
+      element.removeEventListener('pointerdown', press, true)
+      window.removeEventListener('pointerup', release, true)
+      window.removeEventListener('pointercancel', release, true)
+      pressed = false
       cancelled = true
       ready = false
       flavour = null
@@ -287,10 +322,22 @@
      `following` in here would re-run this whenever the locate button
      is pressed. */
   $effect(() => {
-    const reading = position.reading
+    const reading = carReading
     if (!ready) return
     untrack(() => car?.update(reading))
   })
+
+  /* The navigation session, for as long as the screen is open: the
+     whole of it once, then the daemon's events. */
+  $effect(() => {
+    refreshNav()
+    return watchNav()
+  })
+
+  const isNavigating = $derived(navigating())
+
+  /* Where the car is drawn: on the route while following it. */
+  const carReading = $derived(onRoute(position.reading))
 
   function follow(at: [number, number], first: boolean): void {
     if (!map) return
@@ -306,10 +353,11 @@
       return
     }
 
-    /* Not while the map is already moving -- a zoom in progress, or
-       fingers on it. Jumping would cut the zoom off halfway; the car
-       is put back in the middle on the next frame after it ends. */
-    if (following && !map.isMoving()) map.jumpTo({ center: at })
+    /* Not while the map is already moving -- a zoom in progress -- or
+       while it is being pressed, which may be the start of a drag.
+       Jumping would cut either off; the car is put back in the middle
+       on the next frame after it ends. */
+    if (following && !pressed && !map.isMoving()) map.jumpTo({ center: at })
   }
 
   /* The pin on the map, wherever it was set -- here, or before the
@@ -378,46 +426,97 @@
     dropAt(at.lat, at.lng)
   }
 
-  /** The list and the keyboard away without choosing anything. The
-   *  field gets the pin's name back if it was emptied to search. */
+  /** The list, the keyboard and the field away, without choosing
+   *  anything: back to the search button. */
   function closeList(): void {
     typing = false
     listOpen = false
+    searchOpen = false
     results = []
-    if (!query.trim() && destination.pin) query = destination.pin.label
+    query = ''
   }
 
-  /** The field tapped: keyboard and list up. With a pin showing, its
-   *  name is cleared away so the saved places are offered -- the pin
-   *  stays, and comes back to the field if nothing else is chosen. */
+  /** The field tapped: keyboard and list up. */
   function openList(): void {
-    if (!listOpen && destination.pin && query === destination.pin.label) {
-      query = ''
-    }
     typing = true
     listOpen = true
   }
 
-  /** Guidance along the route. Not connected yet: the next step. */
-  function start(): void {}
+  /** Start guidance, then follow the car at street level. */
+  async function start(): Promise<void> {
+    if (!(await startNav())) return
+    const reading = position.reading
+    following = true
+    touched = false
+    if (map && located(reading)) {
+      map.easeTo({
+        center: car?.drawn ?? [reading.longitude, reading.latitude],
+        zoom: Math.max(map.getZoom(), PIN_ZOOM),
+        duration: 700,
+      })
+    }
+  }
 
-  /* The route's lines, whenever the options or the choice change. */
+  /** The lines: while navigating, the route being driven, faded behind
+   *  the car; otherwise the plan and its alternatives. */
+  function drawLines(): void {
+    if (!map || !container) return
+    if (isNavigating && nav.shape.length) {
+      const session = nav.session
+      const at: [number, number] | null = session?.snapped
+        ? [session.snapped.longitude, session.snapped.latitude]
+        : null
+      const { driven, ahead } = splitAt(nav.shape, session?.index ?? 0, at)
+      drawRoutes(map, container, [{ shape: ahead, distance: 0, time: 0 }], 0, driven)
+    } else {
+      drawRoutes(map, container, trip.options, trip.chosen)
+    }
+  }
+
+  /* Whenever any of that changes -- about once a second while
+     driving, which is the fading keeping up with the car. */
   $effect(() => {
-    const options = trip.options
-    const chosen = trip.chosen
+    void [isNavigating, nav.shape, nav.session, trip.options, trip.chosen]
     if (!ready) return
-    untrack(() => {
-      if (map && container) drawRoutes(map, container, options, chosen)
-    })
+    untrack(drawLines)
   })
 
-  /* The flag and the stops, whenever the route's places change. */
+  /* The flag and the stops: the session's while navigating, the
+     plan's before. */
   $effect(() => {
-    const goal = trip.destination
-    const stops = trip.stops
+    const goal = isNavigating
+      ? (nav.session?.destination ?? null)
+      : trip.destination
+    const stops = isNavigating ? (nav.session?.stops ?? []) : trip.stops
     if (!ready) return
     untrack(() => tripMarkers?.update(goal, stops))
   })
+
+  /* "Route resumed", once, when the screen finds a session picked up
+     again after the car was off. */
+  let resumeNoticed = false
+  let notice = $state('')
+  $effect(() => {
+    if (!nav.session?.resumed || resumeNoticed) return
+    resumeNoticed = true
+    notice = 'Route resumed'
+    const timer = setTimeout(() => (notice = ''), 6000)
+    return () => clearTimeout(timer)
+  })
+
+  /* The search is a button until pressed, so the top of the map is
+     map; pressed, it opens into the field, empty -- the saved places
+     first -- with the keyboard up. Closed again by a choice, a tap on
+     the map, or the field's own close button. */
+  let searchOpen = $state(false)
+
+  async function openSearch(): Promise<void> {
+    query = ''
+    searchOpen = true
+    await tick()
+    field?.focus()
+    openList()
+  }
 
   /* A new plan, fitted on screen once: the whole route and the car,
      clear of the cards on the left and the controls on the right. The
@@ -438,9 +537,9 @@
       following = false
       touched = true
       map.fitBounds(bounds, {
-        /* Below the search field, above the bottom edge with room for
-           the car's marker, right of the cards, left of the controls. */
-        padding: { top: 120, bottom: 90, left: 400, right: 120 },
+        /* Clear of the edges with room for the car's marker, right of
+           the cards, left of the controls. */
+        padding: { top: 70, bottom: 70, left: 400, right: 120 },
         maxZoom: 16,
         duration: 800,
       })
@@ -459,11 +558,7 @@
     /* The new style has no route in it -- the switch replaces
        everything the old one held. Drawn again once it has settled,
        in the new flavour's colours. */
-    map.once('idle', () => {
-      if (map && container) {
-        drawRoutes(map, container, trip.options, trip.chosen)
-      }
-    })
+    map.once('idle', drawLines)
   })
 
   const zoomIn = () => map?.zoomIn()
@@ -494,9 +589,7 @@
   const DEBOUNCE_MS = 220
 
   let field = $state<HTMLInputElement>()
-  /* What the pin is, when there is one -- so coming back to the screen
-     shows the same text the pin was chosen with. */
-  let query = $state(destination.pin?.label ?? '')
+  let query = $state('')
   let typing = $state(false)
 
   /* The list under the field -- saved places, or suggestions -- has
@@ -528,18 +621,6 @@
   const showSaved = $derived(
     listOpen && query.trim() === '' && savedPlaces.length > 0,
   )
-
-  /* The field follows the pin: its label when one is chosen, and the
-     address once a tapped point's arrives. Not while typing -- that
-     text is the person's. */
-  $effect(() => {
-    const label = destination.pin?.label
-    untrack(() => {
-      /* And empty once the pin has gone -- into a route, mostly, where
-         the route card names it instead. */
-      if (!typing && !listOpen) query = label ?? ''
-    })
-  })
 
   /** "2.3 km away" from the car, or nothing without a position. */
   function away(latitude: number, longitude: number): string {
@@ -596,21 +677,17 @@
     return () => clearTimeout(timer)
   })
 
-  /* Choosing either kind of entry works the same: the list and the
-     keyboard close, the pin goes there, and the map follows it. The
-     field takes the pin's label from the effect above. */
+  /* Choosing either kind of entry works the same: the search closes,
+     the pin goes there, and the map follows it. The pin card names
+     it. */
   function choose(place: Address): void {
-    results = []
-    typing = false
-    listOpen = false
+    closeList()
     fromSearch(place)
     focusPin()
   }
 
   function chooseSaved(place: Place): void {
-    results = []
-    typing = false
-    listOpen = false
+    closeList()
     fromSaved(place)
     focusPin()
   }
@@ -639,27 +716,28 @@
   <CarMarker bind:element={carElement} {look} />
   <DestinationPin bind:element={pinElement} />
 
-  <!-- Bottom left, the route above the pin, the column anchored at
-       its foot so both grow upwards. Out of the way while the keyboard
-       is up, which covers that corner. -->
-  {#if !typing && (destination.pin || trip.destination || trip.pending)}
+  <!-- Top left, the route above the pin, both growing downwards. Out
+       of the way while searching: the field has this corner then. -->
+  {#if !searchOpen && (isNavigating || destination.pin || trip.destination || trip.pending)}
     <div class="cards">
-      <RouteCard onstart={start} />
+      {#if isNavigating}
+        <NavigationCard />
+      {:else}
+        <RouteCard onstart={start} />
+      {/if}
 
       {#if destination.pin}
         {@const pin = destination.pin}
         <PinCard
           {pin}
           distance={pinDistance}
-          routing={hasRoute()}
-          busy={trip.planning}
+          routing={isNavigating || hasRoute()}
+          busy={trip.planning || nav.busy}
           ondirections={() => planTo(pin)}
-          onsetdestination={() => setDestination(pin)}
-          onaddstop={() => addStop(pin)}
-          onclose={() => {
-            clearPin()
-            query = ''
-          }}
+          onsetdestination={() =>
+            isNavigating ? navSetDestination(pin) : setDestination(pin)}
+          onaddstop={() => (isNavigating ? navAddStop(pin) : addStop(pin))}
+          onclose={clearPin}
         />
       {/if}
     </div>
@@ -672,79 +750,98 @@
     </div>
   {/if}
 
-  <div class="search">
-    <div class="query">
-      <Icon name="search" size={20} />
+  {#if notice}
+    <p class="notice" role="status">{notice}</p>
+  {/if}
 
-      <!-- Editable, not readonly: browsers will not place a caret in
-           a readonly field on a touch screen, and the caret is the
-           whole point of it being a real input. inputmode="none"
-           keeps the caret while telling the browser not to raise a
-           keyboard of its own. -->
-      <input
-        bind:this={field}
-        bind:value={query}
-        type="text"
-        inputmode="none"
-        placeholder="Search places..."
-        aria-label="Search places"
-        autocomplete="off"
-        spellcheck="false"
-        onclick={openList}
-      />
+  <!-- Top right, beside the speed: clear of the cards bottom left,
+       and of the search when it is open. -->
+  <!-- Only within a few km of the turn: see turnShown. -->
+  {#if turnShown() && nav.session}
+    <div class="navtop">
+      <TurnBanner session={nav.session} />
+    </div>
+  {/if}
 
-      {#if searching}
-        <Spinner size={18} label="Searching" />
-      {:else if query}
+  {#if searchOpen}
+    <div class="search">
+      <div class="query">
+        <Icon name="search" size={20} />
+
+        <!-- Editable, not readonly: browsers will not place a caret in
+             a readonly field on a touch screen, and the caret is the
+             whole point of it being a real input. inputmode="none"
+             keeps the caret while telling the browser not to raise a
+             keyboard of its own. -->
+        <input
+          bind:this={field}
+          bind:value={query}
+          type="text"
+          inputmode="none"
+          placeholder="Search places..."
+          aria-label="Search places"
+          autocomplete="off"
+          spellcheck="false"
+          onclick={openList}
+        />
+
+        {#if searching}
+          <Spinner size={18} label="Searching" />
+        {/if}
+        <!-- Empties the field; empty already, closes the search. -->
         <button
           class="clear"
-          aria-label="Clear"
+          aria-label={query ? 'Clear' : 'Close search'}
           onclick={() => {
+            if (!query) {
+              closeList()
+              return
+            }
             query = ''
-            clearPin()
             field?.focus()
+            openList()
           }}
         >
           <Icon name="close" size={18} />
         </button>
+      </div>
+
+      {#if showSaved}
+        <ul class="results">
+          <li class="heading">Saved places</li>
+          <!-- By position: names are whatever was typed when saving. -->
+          {#each savedPlaces as place, index (index)}
+            <li>
+              <button class="result" onclick={() => chooseSaved(place)}>
+                <span class="result-title">
+                  <Icon name="star-filled" size={14} />
+                  {capital(place.name)}
+                </span>
+                <span class="result-detail">
+                  {[place.address, away(place.latitude, place.longitude)]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </span>
+              </button>
+            </li>
+          {/each}
+        </ul>
+      {:else if results.length}
+        <ul class="results">
+          {#each results as place (place.osm_id)}
+            <li>
+              <button class="result" onclick={() => choose(place)}>
+                <span class="result-title">{title(place)}</span>
+                <span class="result-detail">{detail(place)}</span>
+              </button>
+            </li>
+          {/each}
+        </ul>
+      {:else if listOpen && query.trim().length >= MIN_CHARS && !searching}
+        <p class="empty">Nothing found</p>
       {/if}
     </div>
-
-    {#if showSaved}
-      <ul class="results">
-        <li class="heading">Saved places</li>
-        <!-- By position: names are whatever was typed when saving. -->
-        {#each savedPlaces as place, index (index)}
-          <li>
-            <button class="result" onclick={() => chooseSaved(place)}>
-              <span class="result-title">
-                <Icon name="star-filled" size={14} />
-                {capital(place.name)}
-              </span>
-              <span class="result-detail">
-                {[place.address, away(place.latitude, place.longitude)]
-                  .filter(Boolean)
-                  .join(' · ')}
-              </span>
-            </button>
-          </li>
-        {/each}
-      </ul>
-    {:else if results.length}
-      <ul class="results">
-        {#each results as place (place.osm_id)}
-          <li>
-            <button class="result" onclick={() => choose(place)}>
-              <span class="result-title">{title(place)}</span>
-              <span class="result-detail">{detail(place)}</span>
-            </button>
-          </li>
-        {/each}
-      </ul>
-    {:else if listOpen && query.trim().length >= MIN_CHARS && !searching}
-      <p class="empty">Nothing found</p>
-    {/if}
-  </div>
+  {/if}
 
   <div class="speed">
     <span class="figure">{speed ?? '–'}</span>
@@ -774,6 +871,17 @@
         </svg>
       </button>
     {/if}
+    <!-- The search, as a button: pressed, it opens into the field at
+         the top left. Below the compass, so it stays put when the
+         compass comes and goes. -->
+    <button
+      class="control"
+      aria-label="Search places"
+      aria-pressed={searchOpen}
+      onclick={() => (searchOpen ? closeList() : openSearch())}
+    >
+      <Icon name="search" size={22} />
+    </button>
     <!-- To the car, and follow it. Hollow while following -- it is
          already doing what it does -- and filled once the map has
          been dragged away, which is when it is worth pressing. -->
@@ -827,7 +935,7 @@
       target={field}
       maxlength={64}
       ondone={() => (typing = false)}
-      oncancel={() => (typing = false)}
+      oncancel={closeList}
     />
   {/if}
 </div>
@@ -1031,20 +1139,45 @@
     border-radius: var(--radius-sm);
   }
 
-  /* Bottom left, clear of the attribution in the other corner. Never
-     taller than the map below the search field: a long list of stops
-     scrolls rather than pushing the top card off the screen. */
+  /* Left of the speed: its right edge, its width and a gap. */
+  .navtop {
+    position: absolute;
+    top: 18px;
+    right: calc(22px + 82px + 12px);
+  }
+
+  /* A word in passing, bottom middle -- the top has the search and
+     the banner -- gone by itself. */
+  .notice {
+    position: absolute;
+    bottom: 24px;
+    left: 50%;
+    z-index: 2;
+    margin: 0;
+    padding: 10px 18px;
+    font-family: var(--font-display);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--accent-ink);
+    background: var(--accent);
+    border-radius: 999px;
+    transform: translateX(-50%);
+    box-shadow: 0 4px 14px rgb(0 0 0 / 0.3);
+  }
+
+  /* Top left, growing downwards. Never taller than the map: a long
+     list of stops scrolls rather than running off the bottom. */
   /* Padded, and pulled out by the same amount: a scrolling box clips
      whatever spills over its edge, and without the room the cards'
      shadows were cut off square at the corners. */
   .cards {
     position: absolute;
+    top: 6px;
     left: 6px;
-    bottom: 16px;
     display: flex;
     flex-direction: column;
     gap: var(--spacing-s);
-    max-height: calc(100% - 86px);
+    max-height: calc(100% - 12px);
     padding: 12px;
     overflow-y: auto;
   }

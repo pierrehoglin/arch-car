@@ -10,13 +10,27 @@
     refresh as refreshPosition,
     watch as watchPosition,
   } from '$lib/position.svelte'
+  import {
+    nav,
+    navigating,
+    onRoute,
+    refresh as refreshNav,
+    watch as watchNav,
+  } from '$lib/navigation.svelte'
   import { mapStyle, registerProtocol } from './style'
   import { Car, type CarLook, type CarMapStatus } from './car'
   import CarMarker from './CarMarker.svelte'
+  import { drawRoutes, splitAt } from './routeLines'
+  import { TripMarkers } from './tripMarkers'
 
   /* A map that only shows where the car is: always centred on it,
      north up, and not to be touched -- a glance, not a tool. The map
      screen is one tap away for anything more.
+
+     And the route being driven, when there is one: the line ahead,
+     what has been driven faded, the flag and the stops -- as the map
+     screen draws them. Only a route being driven; a plan not started
+     stays on the map screen.
 
      Fills its parent. Says how it is getting on through `status`, so
      the tile around it can stay a plain tile when there is no map. */
@@ -44,6 +58,7 @@
   /* Plain: MapLibre owns its own state. */
   let map: MapLibre | undefined
   let car: Car | undefined
+  let tripMarkers: TripMarkers | undefined
   let flavour: boolean | null = null
   let localLabels = false
 
@@ -92,6 +107,8 @@
           car = moving
         }
 
+        tripMarkers = new TripMarkers(created)
+
         created.on('load', () => {
           if (cancelled) return
           /* The effect below places the car from here on. */
@@ -125,6 +142,8 @@
       flavour = null
       car?.remove()
       car = undefined
+      tripMarkers?.clear()
+      tripMarkers = undefined
       created?.remove()
       map = undefined
       status = 'loading'
@@ -133,10 +152,49 @@
 
   $effect(() => watchPosition())
 
+  /* The navigation session: the whole of it once, then the events. */
   $effect(() => {
-    const reading = position.reading
+    refreshNav()
+    return watchNav()
+  })
+
+  /* On the route line while following it, as on the map screen. */
+  const carReading = $derived(onRoute(position.reading))
+
+  $effect(() => {
+    const reading = carReading
     if (status !== 'ready') return
     untrack(() => car?.update(reading))
+  })
+
+  /** The route ahead and behind, or nothing when not navigating. */
+  function drawLines(): void {
+    if (!map || !container) return
+    if (navigating() && nav.shape.length) {
+      const session = nav.session
+      const at: [number, number] | null = session?.snapped
+        ? [session.snapped.longitude, session.snapped.latitude]
+        : null
+      const { driven, ahead } = splitAt(nav.shape, session?.index ?? 0, at)
+      drawRoutes(map, container, [{ shape: ahead, distance: 0, time: 0 }], 0, driven)
+    } else if (map.getSource('trip')) {
+      drawRoutes(map, container, [], 0)
+    }
+  }
+
+  /* About once a second while driving: the fading keeping up. */
+  $effect(() => {
+    void [nav.session, nav.shape]
+    if (status !== 'ready') return
+    untrack(drawLines)
+  })
+
+  $effect(() => {
+    const active = navigating()
+    const goal = active ? (nav.session?.destination ?? null) : null
+    const stops = active ? (nav.session?.stops ?? []) : []
+    if (status !== 'ready') return
+    untrack(() => tripMarkers?.update(goal, stops))
   })
 
   $effect(() => {
@@ -144,6 +202,8 @@
     if (status !== 'ready' || !map || dark === flavour) return
     flavour = dark
     map.setStyle(mapStyle(dark, localLabels))
+    /* The new style has no route in it; drawn again once it settles. */
+    map.once('idle', drawLines)
   })
 </script>
 

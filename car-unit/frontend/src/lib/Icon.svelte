@@ -63,6 +63,20 @@
   import IconMap from '~icons/tabler/map'
   import IconMapPin from '~icons/tabler/map-pin'
   import IconDirections from '~icons/tabler/directions'
+  import IconStraight from '~icons/tabler/arrow-up'
+  import IconTurnLeft from '~icons/tabler/corner-up-left'
+  import IconTurnRight from '~icons/tabler/corner-up-right'
+  import IconSlightLeft from '~icons/tabler/arrow-bear-left'
+  import IconSlightRight from '~icons/tabler/arrow-bear-right'
+  import IconSharpLeft from '~icons/tabler/arrow-sharp-turn-left'
+  import IconSharpRight from '~icons/tabler/arrow-sharp-turn-right'
+  import IconUTurn from '~icons/tabler/arrow-back-up'
+  import IconRampLeft from '~icons/tabler/arrow-ramp-left'
+  import IconRampRight from '~icons/tabler/arrow-ramp-right'
+  import IconRoundabout from '~icons/tabler/arrow-rotary-right'
+  import IconMerge from '~icons/tabler/arrow-merge'
+  import IconFerry from '~icons/tabler/ship'
+  import IconFlag from '~icons/tabler/flag'
   import IconMinus from '~icons/tabler/minus'
   import IconMusic from '~icons/tabler/music'
   import IconPhone from '~icons/tabler/phone'
@@ -146,6 +160,20 @@
     map: IconMap,
     pin: IconMapPin,
     directions: IconDirections,
+    straight: IconStraight,
+    'turn-left': IconTurnLeft,
+    'turn-right': IconTurnRight,
+    'slight-left': IconSlightLeft,
+    'slight-right': IconSlightRight,
+    'sharp-left': IconSharpLeft,
+    'sharp-right': IconSharpRight,
+    'u-turn': IconUTurn,
+    'ramp-left': IconRampLeft,
+    'ramp-right': IconRampRight,
+    roundabout: IconRoundabout,
+    merge: IconMerge,
+    ferry: IconFerry,
+    flag: IconFlag,
     media: IconMusic,
     next: IconNext,
     note: IconMusic,

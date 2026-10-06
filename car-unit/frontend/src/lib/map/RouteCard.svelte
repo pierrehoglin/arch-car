@@ -75,6 +75,11 @@
           <span class="subtitle">{destination.subtitle}</span>
         {/if}
       </div>
+      <!-- Dropping the route, in the corner as on the navigation card,
+           so Start has the whole width. -->
+      <button class="end" aria-label="End route" onclick={end}>
+        <Icon name="trash" size={20} />
+      </button>
     </header>
 
     {#if trip.stops.length}
@@ -147,13 +152,10 @@
     {/if}
 
     {#if trip.destination}
-      <div class="actions">
-        <button class="start" disabled={trip.planning} onclick={onstart}>
-          <Icon name="play" size={18} />
-          Start
-        </button>
-        <button class="end" onclick={end}>End route</button>
-      </div>
+      <button class="start" disabled={trip.planning} onclick={onstart}>
+        <Icon name="play" size={18} />
+        Start
+      </button>
     {/if}
   </section>
 {/if}
@@ -173,7 +175,7 @@
 
   header {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: start;
     gap: var(--spacing-s);
   }
@@ -361,14 +363,7 @@
     border-radius: var(--radius-sm);
   }
 
-  .actions {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: var(--spacing-s);
-  }
-
-  .start,
-  .end {
+  .start {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -379,9 +374,6 @@
     font-size: 15px;
     font-weight: 600;
     border-radius: var(--radius-sm);
-  }
-
-  .start {
     color: var(--accent-ink);
     background: var(--accent);
     border: 0;
@@ -391,10 +383,16 @@
     opacity: 0.5;
   }
 
+  /* Round, as tall as the mark beside the title. */
   .end {
-    color: var(--text);
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    color: var(--text-dim);
     background: var(--panel-2);
     border: 1px solid var(--border);
+    border-radius: 50%;
   }
 
   button:focus-visible {

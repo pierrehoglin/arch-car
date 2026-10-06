@@ -36,7 +36,7 @@ from carlib.core.errors import CarError, NotFoundError
 from carlib.api import events, routes
 from carlib.bluetooth.pairing import Pairing
 from carlib.location import geocoding, places, position
-from carlib.navigation import tiles, download
+from carlib.navigation import tiles, download, session
 from carlib.radio import fm
 from carlib.system import audio, source
 
@@ -279,6 +279,11 @@ async def _watch_position() -> None:
             if not position.same(reading, last):
                 last = reading
                 events.events.publish('position', reading)
+
+            # Guidance follows every reading, not only changed ones: a
+            # car stopped at a junction still needs its distances. It
+            # publishes only what has changed.
+            await session.current.tick(reading)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -477,6 +482,14 @@ async def lifespan(app: FastAPI):
     _position_memory = asyncio.create_task(_remember_position())
     _position_watch = asyncio.create_task(_watch_position())
 
+    # Navigation reports through the stream, and picks up a route left
+    # unfinished when the car was turned off. Resumed here, before the
+    # position watcher's first reading, so that reading can place it.
+    session.current.on_change = lambda payload: events.events.publish(
+        'navigation', payload)
+    with contextlib.suppress(Exception):
+        session.current.resume()
+
     # Map downloads report through the stream, so Settings > Map can
     # show progress -- and a screen opened halfway through picks it up
     # from the replay.
@@ -665,6 +678,24 @@ class RouteBody(BaseModel):
 class PlanBody(BaseModel):
     destination: Point
     stops: list[Point] = []
+
+
+class Waypoint(BaseModel):
+    latitude: float
+    longitude: float
+    title: str = ''
+    subtitle: str = ''
+
+
+class StartBody(BaseModel):
+    choice: int = 0
+    destination: Waypoint
+    stops: list[Waypoint] = []
+
+
+class UpdateBody(BaseModel):
+    destination: Waypoint
+    stops: list[Waypoint] = []
 
 
 class PlaceBody(BaseModel):
@@ -1266,6 +1297,34 @@ async def post_navigate_plan(body: PlanBody) -> dict:
     return await routes.navigate_plan(
         (body.destination.lat, body.destination.lon),
         [(p.lat, p.lon) for p in body.stops])
+
+
+@api.post('/navigate/start')
+async def post_navigate_start(body: StartBody) -> dict:
+    """Start following one of the last plan's routes."""
+    return await routes.navigate_start(
+        body.choice, body.destination.model_dump(),
+        [s.model_dump() for s in body.stops])
+
+
+@api.post('/navigate/update')
+async def post_navigate_update(body: UpdateBody) -> dict:
+    """A new destination or new stops while navigating."""
+    return await routes.navigate_update(
+        body.destination.model_dump(),
+        [s.model_dump() for s in body.stops])
+
+
+@api.post('/navigate/end')
+async def post_navigate_end() -> dict:
+    return await routes.navigate_end()
+
+
+@api.get('/navigate/session')
+async def get_navigate_session() -> dict:
+    """The route being driven, its line included -- for a screen
+    opening mid-drive, and once after every new route."""
+    return await routes.navigate_session()
 
 
 @api.post('/navigate/match')

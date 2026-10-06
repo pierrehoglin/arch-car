@@ -8,6 +8,8 @@
   import { logoForPi, nameForPi } from '$lib/stations'
   import { isDark } from '$lib/settings.svelte'
   import CarMap from '$lib/map/CarMap.svelte'
+  import TurnBanner from '$lib/map/TurnBanner.svelte'
+  import { nav, turnShown } from '$lib/navigation.svelte'
   import type { CarLook, CarMapStatus } from '$lib/map/car'
   import { position, speedOf } from '$lib/position.svelte'
   import {
@@ -341,6 +343,13 @@
            appear with it. -->
       <div class="backdrop" class:shown={mapShown} aria-hidden="true">
         <CarMap bind:status={mapStatus} bind:look={carLook} />
+        <!-- The next turn while a route is being driven, as on the map
+             screen, smaller. CarMap keeps the session current. -->
+        {#if turnShown() && nav.session}
+          <div class="turn">
+            <TurnBanner session={nav.session} compact />
+          </div>
+        {/if}
         <div class="speed">
           <span class="speed-figure">{speed ?? '–'}</span>
           <span class="speed-unit">km/h</span>
@@ -630,6 +639,14 @@
 
   .backdrop.shown {
     opacity: 1;
+  }
+
+  /* Top left, up to the speed circle: its width and two gaps. */
+  .turn {
+    position: absolute;
+    top: var(--spacing);
+    left: var(--spacing);
+    right: calc(72px + var(--spacing) * 2);
   }
 
   /* As on the map screen, a little smaller for the tile. Full

@@ -49,3 +49,92 @@ export const plan = (destination: LatLon, stops: LatLon[] = []) =>
        moment to work out over a cellular link. */
     timeout: 30_000,
   })
+
+/* --- Navigating ---------------------------------------------------- */
+
+/** A destination or stop, as the daemon keeps it while navigating. */
+export interface NavPlace {
+  latitude: number
+  longitude: number
+  title: string
+  subtitle: string
+}
+
+/** One turn still ahead. */
+export interface NavStep {
+  /** Valhalla's maneuver type -- see map/turnIcons. */
+  kind: number
+  instruction: string
+  street: string
+  /** Metres from the car to where it happens. */
+  distance: number
+  /** Set on a stop's arrival: which stop, 1 for the next. */
+  stop?: number
+  title?: string
+}
+
+export type NavStateName =
+  | 'idle'
+  | 'resuming'
+  | 'navigating'
+  | 'rerouting'
+  | 'offline'
+  | 'arrived'
+
+/** The 'navigation' event, about once a second while driving. */
+export interface NavState {
+  state: NavStateName
+  /** Changes when the route itself does: fetch its line again. */
+  version: number
+  /** Picked up again after the car was off. */
+  resumed?: boolean
+  /** "Rerouting…", "Off route — …", "Resuming route · …". */
+  message?: string
+  destination?: NavPlace
+  /** Still to visit, in order. */
+  stops?: NavPlace[]
+  /** Metres and seconds left. */
+  remaining?: number
+  remaining_time?: number
+  next?: NavStep | null
+  /** The turn after the next, when it comes close behind it. */
+  then?: NavStep | null
+  steps?: NavStep[]
+  on_route?: boolean
+  /** Where the car is on the route line, and which way the road goes
+   *  there -- for the marker, while close to the route. */
+  snapped?: { latitude: number; longitude: number; bearing: number | null } | null
+  /** The route segment the car is on, for fading what is driven. */
+  index?: number
+}
+
+/** The session with the route's line, as [lon, lat]. */
+export interface NavDetail extends NavState {
+  shape: [number, number][]
+}
+
+const place = (p: NavPlace) => ({
+  latitude: p.latitude,
+  longitude: p.longitude,
+  title: p.title,
+  subtitle: p.subtitle,
+})
+
+/** Follow one of the last plan's routes. */
+export const start = (choice: number, destination: NavPlace, stops: NavPlace[]) =>
+  request<NavDetail>('/navigate/start', {
+    method: 'POST',
+    body: { choice, destination: place(destination), stops: stops.map(place) },
+  })
+
+/** A new destination or new stops while navigating. */
+export const update = (destination: NavPlace, stops: NavPlace[]) =>
+  request<NavDetail>('/navigate/update', {
+    method: 'POST',
+    body: { destination: place(destination), stops: stops.map(place) },
+    timeout: 30_000,
+  })
+
+export const end = () => request<NavDetail>('/navigate/end', { method: 'POST' })
+
+export const session = () => request<NavDetail>('/navigate/session')

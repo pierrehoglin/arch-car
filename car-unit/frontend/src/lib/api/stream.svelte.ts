@@ -39,6 +39,7 @@ const KNOWN = [
   'map',
   'position',
   'place',
+  'navigation',
 ] as const
 
 const handlers = new Map<string, Set<Handler>>()

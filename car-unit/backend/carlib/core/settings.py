@@ -374,6 +374,14 @@ CATALOGUE: tuple[Known, ...] = (
           'second; a local instance reroutes without signal.'),
     Known('navigation.costing', 'auto', 'How to route: auto, bicycle, '
           'pedestrian, motorcycle, bus, truck or taxi.'),
+    Known('navigation.language', 'en-US', 'Language of the turn '
+          'instructions: en-US or sv-SE. Applies from the next route '
+          'planned.'),
+    Known('navigation.resume', True, 'Pick the route up again after '
+          'the car has been off, from where it was left.', 'bool'),
+    Known('navigation.resume_hours', 24.0, 'Forget a route left '
+          'unfinished for longer than this, rather than resume it.',
+          'float'),
     Known('navigation.off_route_metres', 50.0, 'How far off the line '
           'counts as having left the route.', 'float'),
     Known('navigation.off_route_fixes', 3, 'Consecutive fixes off the '

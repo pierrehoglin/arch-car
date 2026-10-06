@@ -417,6 +417,80 @@ async def navigate_plan(destination: tuple[float, float],
     }
 
 
+def _waypoint(place: dict) -> dict:
+    """A destination or stop as the session keeps it: where, and what
+    the screens call it."""
+    return {
+        'latitude': float(place['latitude']),
+        'longitude': float(place['longitude']),
+        'title': str(place.get('title') or ''),
+        'subtitle': str(place.get('subtitle') or ''),
+    }
+
+
+async def navigate_start(choice: int, destination: dict,
+                         stops: list[dict]) -> dict:
+    """
+    Start following one of the routes the last plan offered.
+
+    The names come with the request: the plan was asked for with
+    coordinates alone, and the screens are what know a place as
+    "Jobbet" rather than a pair of numbers.
+    """
+    from carlib.location import position
+    from carlib.navigation import session
+
+    routes_ = _planned.get('routes') or []
+    if not 0 <= choice < len(routes_):
+        raise PlanFailed('no_route', 'nothing planned to start -- plan a '
+                                     'route first')
+
+    session.current.start(routes_[choice], _waypoint(destination),
+                          [_waypoint(s) for s in stops],
+                          reading=position.latest())
+    return session.current.detail()
+
+
+async def navigate_update(destination: dict, stops: list[dict]) -> dict:
+    """
+    A new destination or a changed list of stops, while navigating:
+    planned from where the car is now, and followed at once.
+    """
+    from carlib.location import position
+    from carlib.navigation import session
+
+    reading = position.latest() or await position.read()
+    if not position.located(reading):
+        raise PlanFailed('position', "the car's position is not known yet")
+
+    goal = _waypoint(destination)
+    via = [_waypoint(s) for s in stops]
+    points = [(reading['latitude'], reading['longitude']),
+              *[(s['latitude'], s['longitude']) for s in via],
+              (goal['latitude'], goal['longitude'])]
+    try:
+        found = await routing.plan(points, alternates=0)
+    except NotFoundError as exc:
+        raise PlanFailed('no_route', str(exc)) from exc
+    except NotAvailableError as exc:
+        raise PlanFailed('offline', str(exc).splitlines()[0]) from exc
+
+    session.current.replace(found[0], goal, via)
+    return session.current.detail()
+
+
+async def navigate_end() -> dict:
+    from carlib.navigation import session
+    session.current.end()
+    return session.current.detail()
+
+
+async def navigate_session() -> dict:
+    """Everything about the route being driven, its line included."""
+    from carlib.navigation import session
+    return session.current.detail()
+
+
 async def navigate_match(points: list[tuple[float, float]],
                          costing: str | None = None) -> dict:
     result = await routing.match(points, costing=costing)

@@ -57,6 +57,16 @@ def is_public() -> bool:
     return 'openstreetmap.de' in base_url()
 
 
+# The language Valhalla writes its instructions in. English to match
+# the screens; Swedish is the other one offered in Settings > Map.
+DEFAULT_LANGUAGE = 'en-US'
+
+
+def language() -> str:
+    return settings.get_str('navigation.language', DEFAULT_LANGUAGE) \
+        or DEFAULT_LANGUAGE
+
+
 def default_costing() -> str:
     costing = settings.get_str('navigation.costing', 'auto')
     return costing if costing in COSTINGS else 'auto'
@@ -187,7 +197,7 @@ async def plan(points: list[tuple[float, float]],
         'locations': [{'lat': round(lat, 6), 'lon': round(lon, 6)}
                       for lat, lon in points],
         'costing': costing or default_costing(),
-        'directions_options': {'units': units},
+        'directions_options': {'units': units, 'language': language()},
     }
     if alternates and len(points) == 2:
         body['alternates'] = int(alternates)

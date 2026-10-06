@@ -5,6 +5,8 @@
   import Row from '$lib/ui/Row.svelte'
   import Segmented from '$lib/ui/Segmented.svelte'
   import Spinner from '$lib/ui/Spinner.svelte'
+  import Switch from '$lib/ui/Switch.svelte'
+  import * as stored from '$lib/api/settings'
   import { formatBytes, type MapJob } from '$lib/api/map'
   import {
     DETAIL_NAMES,
@@ -90,6 +92,46 @@
     }
     return `Installed ${date(info.labels.installed)} · ${formatBytes(info.labels.size_bytes)}`
   })
+
+  /* Navigation settings, read from the daemon's catalogue so the
+     defaults live in carlib/core/settings.py alone. Each control
+     writes its own key, and puts it back if the write fails. */
+  let navValues = $state<Record<string, unknown>>({})
+  let navError = $state('')
+
+  $effect(() => {
+    stored
+      .catalogue()
+      .then((entries) => {
+        const values: Record<string, unknown> = {}
+        for (const entry of entries) {
+          if (!entry.key.startsWith('navigation.')) continue
+          values[entry.key] = entry.set ? entry.value : entry.default
+        }
+        navValues = values
+      })
+      .catch(() => (navError = 'Could not read the navigation settings.'))
+  })
+
+  async function setNav(key: string, value: unknown): Promise<void> {
+    const previous = navValues[key]
+    navValues[key] = value
+    navError = ''
+    try {
+      await stored.update({ [key]: value })
+    } catch {
+      navValues[key] = previous
+      navError = 'Could not save that setting.'
+    }
+  }
+
+  const LANGUAGES = [
+    { value: 'en-US', label: 'English' },
+    { value: 'sv-SE', label: 'Swedish' },
+  ]
+
+  /** How long an unfinished route is kept to resume, in hours. */
+  const KEEP_HOURS = [6, 12, 24, 48]
 
   const PHASES: Record<MapJob['phase'], string> = {
     starting: 'Starting',
@@ -219,6 +261,51 @@
   </Row>
 
   {@render progress('labels')}
+</Card>
+
+<Card eyebrow="Navigation" gap="none" trim>
+  <!-- Valhalla writes the turn instructions, so the language is asked
+       for with each route: a change shows from the next route planned,
+       not on one already being driven. -->
+  <Row title="Instruction language" detail="From the next route planned">
+    <Segmented
+      label="Instruction language"
+      value={String(navValues['navigation.language'] ?? 'en-US')}
+      options={LANGUAGES}
+      onchange={(value) => setNav('navigation.language', value)}
+    />
+  </Row>
+
+  <Row
+    title="Resume after restart"
+    detail="Pick up an unfinished route when the car is turned on again"
+  >
+    <Switch
+      label="Resume after restart"
+      checked={navValues['navigation.resume'] !== false}
+      onchange={(on) => setNav('navigation.resume', on)}
+    />
+  </Row>
+
+  <Row
+    title="Forget an unfinished route after"
+    detail="Older than this, it is not resumed"
+  >
+    <Segmented
+      label="Forget an unfinished route after"
+      disabled={navValues['navigation.resume'] === false}
+      value={String(Number(navValues['navigation.resume_hours'] ?? 24))}
+      options={KEEP_HOURS.map((hours) => ({
+        value: String(hours),
+        label: `${hours} h`,
+      }))}
+      onchange={(value) => setNav('navigation.resume_hours', Number(value))}
+    />
+  </Row>
+
+  {#if navError}
+    <p class="warning">{navError}</p>
+  {/if}
 </Card>
 
 {#if mapData.error}
