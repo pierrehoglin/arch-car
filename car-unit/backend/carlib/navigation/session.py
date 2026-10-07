@@ -92,6 +92,10 @@ class Session:
         self._rerouting = False
         self._step: int | None = None
         self._published: dict | None = None
+        # The speed limits along the route, as speedlimit.spans_for
+        # gives them: [start metres, end metres, km/h or None]. None
+        # until asked for; kept with the route on disk.
+        self.limits: list[list] | None = None
         # Bumped by end(), so a reroute finishing after it is dropped.
         self._generation = getattr(self, '_generation', 0) + 1
 
@@ -126,6 +130,15 @@ class Session:
 
         self.version += 1
         self._step = None
+        self.limits = None
+
+    def set_limits(self, version: int, spans: list[list]) -> None:
+        """The speed limits for the route, once they have arrived --
+        dropped if the route has changed since they were asked for."""
+        if version != self.version or not self.active:
+            return
+        self.limits = spans
+        self._save()
 
     def _progress_at(self, index: int) -> Progress:
         """Where the car would be at a point on the route, before any
@@ -430,6 +443,7 @@ class Session:
             'stops': self.stops,
             'route': self.route.to_dict(),
             'index': self.follower.index if self.follower else 0,
+            'limits': self.limits,
         }
         path = state_file()
         try:
@@ -483,6 +497,7 @@ class Session:
             self._reset()
             return False
 
+        self.limits = data.get('limits') or None
         self.follower.index = int(data.get('index', 0) or 0)
         self.follower.progress = self._progress_at(self.follower.index)
         self.state = 'resuming'

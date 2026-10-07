@@ -43,6 +43,14 @@
     trip,
   } from '$lib/route.svelte'
   import { Car, type CarLook } from '$lib/map/car'
+  import SpeedLimitSign from '$lib/map/SpeedLimitSign.svelte'
+  import {
+    loadLimitSettings,
+    overLimit,
+    refreshLimit,
+    speedLimit,
+    watchLimit,
+  } from '$lib/speedlimit.svelte'
   import {
     NO_PADDING,
     SCREEN,
@@ -462,6 +470,13 @@
   /* The settings, each time the screen opens. */
   $effect(() => {
     loadDriving()
+    loadLimitSettings()
+  })
+
+  /* The speed limit: where it is now, then each change. */
+  $effect(() => {
+    refreshLimit()
+    return watchLimit()
   })
 
   /* The pin on the map, wherever it was set -- here, or before the
@@ -590,18 +605,6 @@
     const stops = isNavigating ? (nav.session?.stops ?? []) : trip.stops
     if (!ready) return
     untrack(() => tripMarkers?.update(goal, stops))
-  })
-
-  /* "Route resumed", once, when the screen finds a session picked up
-     again after the car was off. */
-  let resumeNoticed = false
-  let notice = $state('')
-  $effect(() => {
-    if (!nav.session?.resumed || resumeNoticed) return
-    resumeNoticed = true
-    notice = 'Route resumed'
-    const timer = setTimeout(() => (notice = ''), 6000)
-    return () => clearTimeout(timer)
   })
 
   /* The search is a button until pressed, so the top of the map is
@@ -877,10 +880,6 @@
     </div>
   {/if}
 
-  {#if notice}
-    <p class="notice" role="status">{notice}</p>
-  {/if}
-
   <!-- Top right, beside the speed: clear of the cards bottom left,
        and of the search when it is open. -->
   <!-- Only within a few km of the turn: see turnShown. -->
@@ -971,9 +970,19 @@
   {/if}
 
   <div class="speed">
-    <span class="figure">{speed ?? '–'}</span>
+    <span class="figure" class:over={overLimit(speed)}>{speed ?? '–'}</span>
     <span class="unit">km/h</span>
   </div>
+
+  <!-- Under the speed, centred on it. -->
+  {#if speedLimit.current.shown}
+    <div class="limit">
+      <SpeedLimitSign
+        limit={speedLimit.current.limit}
+        changes={speedLimit.changes}
+      />
+    </div>
+  {/if}
 
   <div class="controls">
     <!-- While the map is turned, and always while driving a route, so
@@ -1275,25 +1284,6 @@
     right: calc(22px + 82px + 12px);
   }
 
-  /* A word in passing, bottom middle -- the top has the search and
-     the banner -- gone by itself. */
-  .notice {
-    position: absolute;
-    bottom: 24px;
-    left: 50%;
-    z-index: 2;
-    margin: 0;
-    padding: 10px 18px;
-    font-family: var(--font-display);
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--accent-ink);
-    background: var(--accent);
-    border-radius: 999px;
-    transform: translateX(-50%);
-    box-shadow: 0 4px 14px rgb(0 0 0 / 0.3);
-  }
-
   /* Top left, growing downwards. Never taller than the map: a long
      list of stops scrolls rather than running off the bottom. */
   /* Padded, and pulled out by the same amount: a scrolling box clips
@@ -1339,6 +1329,20 @@
     /* Full brightness even under Night Panel: this is the readout the
        mode exists to keep legible. */
     color: var(--text);
+  }
+
+  /* Over the limit: the number itself in red, which is where the eye
+     already is. */
+  .figure.over {
+    color: var(--danger);
+  }
+
+  /* Under the speed circle, centred on it: the circle is 82 px wide
+     and 22 px in from the edge, the sign 56. */
+  .limit {
+    position: absolute;
+    top: calc(18px + 82px + 10px);
+    right: calc(22px + (82px - 56px) / 2);
   }
 
   .unit {

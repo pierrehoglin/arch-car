@@ -387,6 +387,19 @@ CATALOGUE: tuple[Known, ...] = (
           'compass on the map switches it off for the drive.', 'bool'),
     Known('navigation.speed_zoom', True, 'While navigating, zoom out '
           'with speed and in again before each turn.', 'bool'),
+    Known('speedlimit.show', True, 'Show the speed limit under the '
+          'speed, from the router\'s map data.', 'bool'),
+    Known('speedlimit.free', True, 'Also without a route: match the '
+          'last few fixes to the road every so often to find its limit. '
+          'Off, the limit shows only while navigating.', 'bool'),
+    Known('speedlimit.warn', 'change', 'Turn the speed red when over '
+          'the limit: off, change (only for a while after the limit '
+          'changes) or always.'),
+    Known('speedlimit.warn_seconds', 10, 'How long the warning lasts '
+          'after the limit changes, with speedlimit.warn at change.',
+          'int'),
+    Known('speedlimit.margin', 5, 'How far over the limit, in km/h, '
+          'before the warning shows.', 'int'),
     Known('navigation.off_route_metres', 50.0, 'How far off the line '
           'counts as having left the route.', 'float'),
     Known('navigation.off_route_fixes', 3, 'Consecutive fixes off the '

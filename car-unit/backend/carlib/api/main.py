@@ -36,7 +36,7 @@ from carlib.core.errors import CarError, NotFoundError
 from carlib.api import events, routes
 from carlib.bluetooth.pairing import Pairing
 from carlib.location import geocoding, places, position
-from carlib.navigation import tiles, download, session
+from carlib.navigation import tiles, download, session, speedlimit
 from carlib.radio import fm
 from carlib.system import audio, source
 
@@ -284,6 +284,9 @@ async def _watch_position() -> None:
             # car stopped at a junction still needs its distances. It
             # publishes only what has changed.
             await session.current.tick(reading)
+            # And the speed limit, from the route or the road -- after
+            # the session, so it reads where this fix put the car.
+            await speedlimit.current.tick(reading, session.current)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -489,6 +492,14 @@ async def lifespan(app: FastAPI):
         'navigation', payload)
     with contextlib.suppress(Exception):
         session.current.resume()
+
+    # The speed limit, through the stream like the rest.
+    speedlimit.current.on_change = lambda payload: events.events.publish(
+        'speedlimit', payload)
+    # The position watcher is already running and may have worked out
+    # the first state before this was connected: sent once now, so the
+    # stream's replay has it.
+    events.events.publish('speedlimit', speedlimit.current.payload())
 
     # Map downloads report through the stream, so Settings > Map can
     # show progress -- and a screen opened halfway through picks it up
@@ -1318,6 +1329,13 @@ async def post_navigate_update(body: UpdateBody) -> dict:
 @api.post('/navigate/end')
 async def post_navigate_end() -> dict:
     return await routes.navigate_end()
+
+
+@api.get('/speedlimit')
+async def get_speedlimit() -> dict:
+    """The limit where the car is, as the 'speedlimit' event has it --
+    for a screen opening before the next change."""
+    return speedlimit.current.payload()
 
 
 @api.get('/navigate/session')

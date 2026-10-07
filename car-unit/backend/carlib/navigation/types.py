@@ -62,6 +62,25 @@ def decode_polyline(encoded: str,
     return points
 
 
+def encode_polyline(points: list[tuple[float, float]],
+                    precision: int = POLYLINE_PRECISION) -> str:
+    """The reverse of decode_polyline: for handing a route's line back
+    to the router, as the speed limits do."""
+    factor = 10 ** precision
+    out: list[str] = []
+    last_lat = last_lon = 0
+    for lat, lon in points:
+        ilat, ilon = round(lat * factor), round(lon * factor)
+        for delta in (ilat - last_lat, ilon - last_lon):
+            value = ~(delta << 1) if delta < 0 else delta << 1
+            while value >= 0x20:
+                out.append(chr((0x20 | (value & 0x1F)) + 63))
+                value >>= 5
+            out.append(chr(value + 63))
+        last_lat, last_lon = ilat, ilon
+    return ''.join(out)
+
+
 def distance_metres(lat1: float, lon1: float,
                     lat2: float, lon2: float) -> float:
     """Great-circle distance, haversine."""

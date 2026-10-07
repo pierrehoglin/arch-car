@@ -9,6 +9,14 @@
   import { isDark } from '$lib/settings.svelte'
   import CarMap from '$lib/map/CarMap.svelte'
   import TurnBanner from '$lib/map/TurnBanner.svelte'
+  import SpeedLimitSign from '$lib/map/SpeedLimitSign.svelte'
+  import {
+    loadLimitSettings,
+    overLimit,
+    refreshLimit,
+    speedLimit,
+    watchLimit,
+  } from '$lib/speedlimit.svelte'
   import { nav, turnShown } from '$lib/navigation.svelte'
   import type { CarLook, CarMapStatus } from '$lib/map/car'
   import { position, speedOf } from '$lib/position.svelte'
@@ -185,6 +193,13 @@
   /* The map tile: a live map behind it once there is one to show,
      and the plain link it always was when there is not. */
   let mapStatus = $state<CarMapStatus>('loading')
+
+  /* The speed limit, for the sign on the map tile. */
+  $effect(() => {
+    loadLimitSettings()
+    refreshLimit()
+    return watchLimit()
+  })
   let carLook = $state<CarLook>({ source: 'none', pointing: false })
   const mapShown = $derived(mapStatus === 'ready')
 
@@ -351,9 +366,20 @@
           </div>
         {/if}
         <div class="speed">
-          <span class="speed-figure">{speed ?? '–'}</span>
+          <span class="speed-figure" class:over={overLimit(speed)}>
+            {speed ?? '–'}
+          </span>
           <span class="speed-unit">km/h</span>
         </div>
+        {#if speedLimit.current.shown}
+          <div class="limit">
+            <SpeedLimitSign
+              limit={speedLimit.current.limit}
+              size={46}
+              changes={speedLimit.changes}
+            />
+          </div>
+        {/if}
         <span class="osm">© OpenStreetMap</span>
       </div>
 
@@ -693,6 +719,17 @@
     font-weight: 700;
     font-variant-numeric: tabular-nums;
     color: var(--text);
+  }
+
+  .speed-figure.over {
+    color: var(--danger);
+  }
+
+  /* Under the speed circle, centred on it: 72 px wide, the sign 46. */
+  .limit {
+    position: absolute;
+    top: calc(var(--spacing) + 72px + 8px);
+    right: calc(var(--spacing) + (72px - 46px) / 2);
   }
 
   .speed-unit {

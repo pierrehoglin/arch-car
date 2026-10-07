@@ -8,6 +8,7 @@
   import Switch from '$lib/ui/Switch.svelte'
   import * as stored from '$lib/api/settings'
   import { applyDriving } from '$lib/driving.svelte'
+  import { applyLimitSetting } from '$lib/speedlimit.svelte'
   import { formatBytes, type MapJob } from '$lib/api/map'
   import {
     DETAIL_NAMES,
@@ -106,7 +107,11 @@
       .then((entries) => {
         const values: Record<string, unknown> = {}
         for (const entry of entries) {
-          if (!entry.key.startsWith('navigation.')) continue
+          if (
+            !entry.key.startsWith('navigation.') &&
+            !entry.key.startsWith('speedlimit.')
+          )
+            continue
           values[entry.key] = entry.set ? entry.value : entry.default
         }
         navValues = values
@@ -121,6 +126,7 @@
     try {
       await stored.update({ [key]: value })
       applyDriving(key, value)
+      applyLimitSetting(key, value)
     } catch {
       navValues[key] = previous
       navError = 'Could not save that setting.'
@@ -336,6 +342,76 @@
       label="Zoom with speed"
       checked={navValues['navigation.speed_zoom'] !== false}
       onchange={(on) => setNav('navigation.speed_zoom', on)}
+    />
+  </Row>
+</Card>
+
+<!-- The sign under the speed, on the map and the home screen. From the
+     router's map data: the route's while navigating, the road's
+     otherwise. -->
+<Card eyebrow="Speed limit" gap="none" trim>
+  <Row title="Show speed limit" detail="A sign under the speed">
+    <Switch
+      label="Show speed limit"
+      checked={navValues['speedlimit.show'] !== false}
+      onchange={(on) => setNav('speedlimit.show', on)}
+    />
+  </Row>
+
+  <Row
+    title="Also without a route"
+    detail="Looks up the road being driven about every 15 s or 2 km. Off, only while navigating."
+  >
+    <Switch
+      label="Also without a route"
+      disabled={navValues['speedlimit.show'] === false}
+      checked={navValues['speedlimit.free'] !== false}
+      onchange={(on) => setNav('speedlimit.free', on)}
+    />
+  </Row>
+
+  <Row title="Warn when over the limit" detail="The speed turns red">
+    <Segmented
+      label="Warn when over the limit"
+      disabled={navValues['speedlimit.show'] === false}
+      value={String(navValues['speedlimit.warn'] ?? 'change')}
+      options={[
+        { value: 'off', label: 'Off' },
+        { value: 'change', label: 'After a change' },
+        { value: 'always', label: 'Always' },
+      ]}
+      onchange={(value) => setNav('speedlimit.warn', value)}
+    />
+  </Row>
+
+  <Row
+    title="Warning time after a change"
+    detail="How long the speed stays red after the limit changes"
+  >
+    <Segmented
+      label="Warning time after a change"
+      disabled={navValues['speedlimit.show'] === false ||
+        (navValues['speedlimit.warn'] ?? 'change') !== 'change'}
+      value={String(Number(navValues['speedlimit.warn_seconds'] ?? 10))}
+      options={[5, 10, 15, 20, 30].map((seconds) => ({
+        value: String(seconds),
+        label: `${seconds} s`,
+      }))}
+      onchange={(value) => setNav('speedlimit.warn_seconds', Number(value))}
+    />
+  </Row>
+
+  <Row title="Margin" detail="How far over before it counts">
+    <Segmented
+      label="Margin"
+      disabled={navValues['speedlimit.show'] === false ||
+        (navValues['speedlimit.warn'] ?? 'change') === 'off'}
+      value={String(Number(navValues['speedlimit.margin'] ?? 5))}
+      options={[0, 5, 10].map((kmh) => ({
+        value: String(kmh),
+        label: `${kmh} km/h`,
+      }))}
+      onchange={(value) => setNav('speedlimit.margin', Number(value))}
     />
   </Row>
 </Card>
