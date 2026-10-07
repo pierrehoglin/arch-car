@@ -269,20 +269,23 @@ class Watcher:
             await asyncio.wait_for(self._wake.wait(), seconds)
 
     async def _survey(self) -> None:
-        try:
-            found = await ofono.modems()
-        except NotAvailableError:
-            found = []
-        phones = [m for m in found if m.type == 'hfp'] or found
+        found = await self._phones()
 
         ready = {}
-        for modem in phones:
-            if not modem.ready and modem.path not in self.lines:
-                # Brought online once seen: its call interfaces only
-                # appear then.
+        for modem in found:
+            if not modem.ready and modem.powered and not modem.online:
+                # Connected -- powered is oFono's word for it -- but not
+                # online yet, so no call interfaces. Online asks for
+                # nothing over the air. Never Powered: for oFono that is
+                # "connect to this phone", and setting it for every
+                # paired phone it knows reconnected a phone somebody had
+                # just disconnected, every two seconds.
                 with contextlib.suppress(Exception):
-                    from carlib.bluetooth import calls
-                    modem = await calls.online(modem.path)
+                    proxy = ofono.modem_proxy(modem.path)
+                    await proxy.set_property('Online', ('b', True))
+                    p = props(await proxy.get_properties())
+                    modem.online = bool(p.get('Online', False))
+                    modem.interfaces = list(p.get('Interfaces') or [])
             if modem.ready:
                 ready[modem.path] = modem
 
@@ -296,6 +299,28 @@ class Watcher:
         for path in list(self.lines):
             await self._reconcile(path)
         await self._after_change()
+
+    async def _phones(self) -> list[ofono.ModemInfo]:
+        """
+        oFono's phones -- only while Bluetooth is running.
+
+        Checked first, as the pairing watcher does: asking oFono
+        anything starts it on demand when it is stopped, and oFono pulls
+        Bluetooth up with it (Wants=bluetooth.service, so HFP registers
+        in the right order). Turning Bluetooth off then lasted until
+        the next survey, two seconds later.
+        """
+        from carlib.system import bluetooth, services
+        try:
+            if not (await services.status(bluetooth.SERVICE)).active:
+                return []
+        except Exception:
+            return []
+        try:
+            found = await ofono.modems()
+        except NotAvailableError:
+            return []
+        return [m for m in found if m.type == 'hfp'] or found
 
     def _take(self, modem: ofono.ModemInfo) -> None:
         line = Line(modem=modem, address=_address(modem))
