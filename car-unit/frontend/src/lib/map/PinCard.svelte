@@ -1,6 +1,10 @@
 <script lang="ts">
   import Icon from '../Icon.svelte'
+  import Keyboard from '../ui/Keyboard.svelte'
   import Spinner from '../ui/Spinner.svelte'
+  import * as places from '../api/places'
+  import { metresBetween } from '../address'
+  import type { Place } from '../api/types'
   import type { Pin } from '../destination.svelte'
 
   /* What the pin is on. Bottom left of the map, growing upwards as it
@@ -37,6 +41,77 @@
 
   /* A point still being looked up has nothing to name it by yet. */
   const blocked = $derived(busy || pin.looking)
+
+  /* Saving the pin as a place: the star in the header, a name typed
+     on the keyboard, and the daemon's places -- the ones the search
+     list, the weather and Settings all read. */
+
+  /** Closer than this to a saved place, the pin is on it. */
+  const SAME_METRES = 30
+
+  let savedPlaces = $state<Place[]>([])
+  $effect(() => {
+    places
+      .saved()
+      .then((list) => (savedPlaces = list))
+      .catch(() => {})
+  })
+
+  /** The saved place the pin is on, if any. */
+  const savedAs = $derived(
+    savedPlaces.find(
+      (place) =>
+        metresBetween(
+          place.latitude,
+          place.longitude,
+          pin.latitude,
+          pin.longitude,
+        ) < SAME_METRES,
+    )?.name ?? null,
+  )
+
+  let naming = $state(false)
+  let saving = $state(false)
+  let saveError = $state('')
+  /** A typed name already used by a place somewhere else: saving
+   *  under it moves that place here, so it is asked first. */
+  let clash = $state<{ name: string; typed: string } | null>(null)
+
+  async function store(name: string): Promise<void> {
+    clash = null
+    saving = true
+    saveError = ''
+    try {
+      savedPlaces = await places.save({
+        name,
+        latitude: pin.latitude,
+        longitude: pin.longitude,
+        address: [pin.title, pin.subtitle].filter(Boolean).join(', '),
+        lookup: !pin.title,
+      })
+    } catch {
+      saveError = 'Could not save the place.'
+    } finally {
+      saving = false
+    }
+  }
+
+  function named(text: string): void {
+    naming = false
+    const name = text.trim()
+    if (!name) return
+    const existing = savedPlaces.find(
+      (place) => place.name.toLowerCase() === name.toLowerCase(),
+    )
+    if (existing) {
+      clash = { name: existing.name, typed: name }
+      return
+    }
+    store(name)
+  }
+
+  const capital = (text: string) =>
+    text ? text[0].toUpperCase() + text.slice(1) : text
 </script>
 
 <section class="card" aria-label="Pin">
@@ -62,12 +137,49 @@
       {/if}
     </div>
 
-    <button class="close" aria-label="Remove the pin" onclick={onclose}>
-      <Icon name="close" size={18} />
-    </button>
+    <div class="corner">
+      <!-- Filled when the pin is on a saved place, and then only says
+           so: renaming or forgetting one is done in Settings. -->
+      <button
+        class="icon"
+        class:on={!!savedAs}
+        aria-label={savedAs ? `Saved as ${capital(savedAs)}` : 'Save this place'}
+        disabled={pin.looking || saving || !!savedAs}
+        onclick={() => (naming = true)}
+      >
+        {#if saving}
+          <Spinner size={18} label="Saving" />
+        {:else}
+          <Icon name={savedAs ? 'star-filled' : 'star'} size={20} />
+        {/if}
+      </button>
+      <button class="icon" aria-label="Remove the pin" onclick={onclose}>
+        <Icon name="close" size={18} />
+      </button>
+    </div>
   </header>
 
-  <!-- Room for more about the place goes here, above the actions. -->
+  {#if savedAs}
+    <p class="note saved">
+      <Icon name="star-filled" size={14} />
+      Saved as {capital(savedAs)}
+    </p>
+  {:else if clash}
+    <div class="clash">
+      <p class="note">
+        “{capital(clash.name)}” is already saved somewhere else. Move it
+        here?
+      </p>
+      <div class="clash-actions">
+        <button class="secondary" onclick={() => clash && store(clash.typed)}>
+          Move here
+        </button>
+        <button class="secondary" onclick={() => (clash = null)}>Cancel</button>
+      </div>
+    </div>
+  {:else if saveError}
+    <p class="note warning">{saveError}</p>
+  {/if}
 
   <div class="actions">
     {#if routing}
@@ -96,6 +208,20 @@
     {/if}
   </div>
 </section>
+
+{#if naming}
+  <!-- The keyboard's own buffer above the keys, with the address as
+       a start: most places are saved under a short name of their
+       own, and the street is something to edit down from. -->
+  <Keyboard
+    initial={pin.title}
+    label="Name the place"
+    placeholder="Home, work…"
+    maxlength={32}
+    ondone={named}
+    oncancel={() => (naming = false)}
+  />
+{/if}
 
 <style>
   .card {
@@ -166,20 +292,67 @@
     font-variant-numeric: tabular-nums;
   }
 
-  .close {
+  .corner {
+    display: flex;
+    margin: -4px -4px 0 0;
+  }
+
+  .icon {
     display: grid;
     place-items: center;
     width: 40px;
     height: 40px;
-    margin: -4px -4px 0 0;
     color: var(--text-dim);
     background: none;
     border: 0;
     border-radius: 50%;
   }
 
-  .close:active {
+  .icon:active:not(:disabled) {
     background: var(--panel-2);
+  }
+
+  /* Saved: the star in the accent, as the saved places are in the
+     search list. Disabled, but not dimmed -- it is saying something. */
+  .icon.on {
+    color: var(--accent);
+  }
+
+  .icon:disabled:not(.on) {
+    opacity: 0.45;
+  }
+
+  .note {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    font-size: 13.5px;
+    color: var(--text-dim);
+  }
+
+  .note.saved :global(svg) {
+    color: var(--accent);
+  }
+
+  .note.warning {
+    color: var(--danger);
+  }
+
+  .clash {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-s);
+  }
+
+  .clash-actions {
+    display: flex;
+    gap: var(--spacing-s);
+  }
+
+  .clash-actions .secondary {
+    flex: 1;
+    height: 40px;
   }
 
   .actions {
@@ -229,7 +402,7 @@
     opacity: 0.55;
   }
 
-  .close:focus-visible,
+  .icon:focus-visible,
   .secondary:focus-visible,
   .directions:focus-visible {
     outline: 2px solid var(--accent);
