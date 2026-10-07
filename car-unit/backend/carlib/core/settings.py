@@ -382,6 +382,11 @@ CATALOGUE: tuple[Known, ...] = (
     Known('navigation.resume_hours', 24.0, 'Forget a route left '
           'unfinished for longer than this, rather than resume it.',
           'float'),
+    Known('navigation.heading_up', True, 'Turn the map so the way the '
+          'car is going points up, from the start of each route. The '
+          'compass on the map switches it off for the drive.', 'bool'),
+    Known('navigation.speed_zoom', True, 'While navigating, zoom out '
+          'with speed and in again before each turn.', 'bool'),
     Known('navigation.off_route_metres', 50.0, 'How far off the line '
           'counts as having left the route.', 'float'),
     Known('navigation.off_route_fixes', 3, 'Consecutive fixes off the '

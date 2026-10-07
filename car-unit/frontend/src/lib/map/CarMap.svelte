@@ -21,11 +21,19 @@
   import { Car, type CarLook, type CarMapStatus } from './car'
   import CarMarker from './CarMarker.svelte'
   import { drawRoutes, splitAt } from './routeLines'
+  import { NO_PADDING, TILE, ZoomFollower, driveCamera } from './driveCamera'
+  import { driving, headingUpNow, loadDriving } from '$lib/driving.svelte'
+  import { speedOf } from '$lib/position.svelte'
   import { TripMarkers } from './tripMarkers'
 
   /* A map that only shows where the car is: always centred on it,
      north up, and not to be touched -- a glance, not a tool. The map
      screen is one tap away for anything more.
+
+     While a route is being driven, the driving view as the map screen
+     has it -- turned with the car if that is the choice there, the car
+     low, zoomed for the speed and in before turns -- in a narrower
+     range, for the size. Nobody can touch this map, so it never pauses.
 
      And the route being driven, when there is one: the line ahead,
      what has been driven faded, the flag and the stops -- as the map
@@ -101,9 +109,17 @@
           const moving = new Car(carElement, (next) => (look = next))
           moving.attach(created)
           /* Every frame, without exception. Nobody can move this map,
-             so there is nothing to wait for or step aside from. */
-          moving.onmove = (at, first) =>
-            created?.jumpTo(first ? { center: at, zoom } : { center: at })
+             so there is nothing to wait for or step aside from --
+             except the camera easing into or out of the driving view. */
+          moving.onmove = (at, first) => {
+            if (!created) return
+            if (first) {
+              created.jumpTo({ center: at, zoom })
+              return
+            }
+            if (created.isMoving()) return
+            created.jumpTo(navigating() ? cameraAt(created, at, false) : { center: at })
+          }
           car = moving
         }
 
@@ -151,6 +167,45 @@
   })
 
   $effect(() => watchPosition())
+
+  /* The driving view's settings, each time the tile is built. */
+  $effect(() => {
+    loadDriving()
+  })
+
+  /** Plain: frame-to-frame state. */
+  const zoomer = new ZoomFollower(TILE)
+
+  function cameraAt(m: MapLibre, at: [number, number], settle: boolean) {
+    const kmh = speedOf(position.reading)
+    const next = nav.session?.next?.distance ?? null
+    const z = !driving.speedZoom
+      ? null
+      : settle
+        ? zoomer.settle(kmh, next)
+        : zoomer.step(kmh, next)
+    return driveCamera(m, at, car?.bearing ?? null, headingUpNow(), z)
+  }
+
+  /* Into the driving view and out of it, and again when the compass on
+     the map screen or a setting changes it. Derived, so this hears
+     the change and not every session event. */
+  const active = $derived(navigating())
+  const headingUp = $derived(headingUpNow())
+  $effect(() => {
+    void [active, headingUp, driving.speedZoom]
+    if (status !== 'ready') return
+    untrack(() => {
+      const m = map
+      const at = car?.drawn
+      if (!m || !at) return
+      m.easeTo(
+        active
+          ? { ...cameraAt(m, at, true), duration: 700 }
+          : { center: at, bearing: 0, zoom, padding: NO_PADDING, duration: 700 },
+      )
+    })
+  })
 
   /* The navigation session: the whole of it once, then the events. */
   $effect(() => {

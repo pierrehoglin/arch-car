@@ -29,6 +29,11 @@ interface Store {
    *  stop -- and still waiting on the router. */
   busy: boolean
   error: string
+  /** Counts routes: one more each time navigating starts, from
+   *  nothing to something. What a choice made for "this drive" --
+   *  the compass turning heading-up off -- is tied to, so the next
+   *  route starts fresh without anyone having to clear it. */
+  trip: number
 }
 
 export const nav = $state<Store>({
@@ -38,6 +43,7 @@ export const nav = $state<Store>({
   showAll: false,
   busy: false,
   error: '',
+  trip: 0,
 })
 
 /** Whether there is a session to show: anything but idle. */
@@ -77,9 +83,16 @@ export function onRoute(reading: Position | null): Position | null {
   }
 }
 
+/** The session from the daemon, counting a route that has begun. */
+function setSession(state: NavState): void {
+  const was = navigating()
+  nav.session = state
+  if (!was && navigating()) nav.trip++
+}
+
 function take(detail: api.NavDetail): void {
   const { shape, ...state } = detail
-  nav.session = state
+  setSession(state)
   nav.shape = shape
   nav.shapeVersion = state.version
 }
@@ -111,7 +124,7 @@ export async function refresh(): Promise<void> {
 export function watch(): () => void {
   return on('navigation', (data) => {
     const state = data as NavState
-    nav.session = state
+    setSession(state)
     if (state.state === 'idle') {
       nav.shape = []
       nav.shapeVersion = state.version

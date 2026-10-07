@@ -43,6 +43,19 @@
     trip,
   } from '$lib/route.svelte'
   import { Car, type CarLook } from '$lib/map/car'
+  import {
+    NO_PADDING,
+    SCREEN,
+    ZoomFollower,
+    driveCamera,
+  } from '$lib/map/driveCamera'
+  import {
+    driving,
+    headingUpNow,
+    loadDriving,
+    northUp,
+    resumeHeading,
+  } from '$lib/driving.svelte'
   import { distanceLabel, metresBetween } from '$lib/address'
   import {
     clear as clearPin,
@@ -222,6 +235,20 @@
           following = false
         })
 
+        /* While a route is being driven, any hand on the map stops all
+           of the driving view -- a pinch or a twist as well as a drag
+           -- and the centre button brings it back. Only gestures:
+           MapLibre gives those an originalEvent, and its own camera
+           moves, the driving view's included, none. Outside a route,
+           zooming keeps the car in the middle, as before. */
+        const byHand = (event: { originalEvent?: unknown }) => {
+          if (!event.originalEvent || !untrack(() => isNavigating)) return
+          touched = true
+          following = false
+        }
+        created.on('zoomstart', byHand)
+        created.on('rotatestart', byHand)
+
         if (carElement) {
           const moving = new Car(carElement, (next) => (look = next))
           moving.attach(created)
@@ -353,12 +380,89 @@
       return
     }
 
-    /* Not while the map is already moving -- a zoom in progress -- or
-       while it is being pressed, which may be the start of a drag.
-       Jumping would cut either off; the car is put back in the middle
-       on the next frame after it ends. */
-    if (following && !pressed && !map.isMoving()) map.jumpTo({ center: at })
+    /* Not while the map is already moving -- a zoom in progress, or
+       the camera easing into the driving view -- or while it is being
+       pressed, which may be the start of a drag. Jumping would cut
+       either off; the car is put back on the next frame after. */
+    if (!following || pressed || map.isMoving()) return
+
+    /* Driving a route: turned, zoomed and placed for it. */
+    if (isNavigating) {
+      map.jumpTo(cameraAt(at, false))
+      return
+    }
+    map.jumpTo({ center: at })
   }
+
+  /** Follows the speed and the next turn for the zoom. Plain: frame
+   *  to frame state, nothing to draw from. */
+  const zoomer = new ZoomFollower(SCREEN)
+
+  /** The driving view's camera with the car at `at`: each frame
+   *  (settle false), or straight to where it should be (settle true),
+   *  for easing into the view. */
+  function cameraAt(at: [number, number], settle: boolean) {
+    if (!map) return { center: at }
+    const kmh = speedOf(position.reading)
+    const next = nav.session?.next?.distance ?? null
+    const zoom = !driving.speedZoom
+      ? null
+      : settle
+        ? zoomer.settle(kmh, next)
+        : zoomer.step(kmh, next)
+    return driveCamera(map, at, car?.bearing ?? null, headingUpNow(), zoom)
+  }
+
+  /** Ease the camera to where following puts it now: the driving view
+   *  while navigating, the car in the middle and north up otherwise. */
+  function settle(duration = 700, ended = false): void {
+    if (!map) return
+    const reading = position.reading
+    const at: [number, number] | null =
+      car?.drawn ??
+      (located(reading) ? [reading.longitude, reading.latitude] : null)
+    if (!at) return
+    if (isNavigating) {
+      map.easeTo({ ...cameraAt(at, true), duration })
+      return
+    }
+    map.easeTo({
+      center: at,
+      bearing: 0,
+      /* Back to the usual zoom when a route ends; otherwise no
+         further out than it, and no nearer than it is. */
+      zoom: ended ? NEAR : Math.max(map.getZoom(), NEAR),
+      padding: NO_PADDING,
+      duration,
+    })
+  }
+
+  /* Into the driving view as a route starts or comes back after a
+     restart; out of it when it ends; and again whenever its own
+     choices change -- the compass, or a setting. Only while following:
+     a map moved by hand stays where it was put, except that leaving
+     the route always faces it north again and drops the car-low
+     padding, which nothing else would. */
+  let wasNavigating = false
+  /* Derived, so the effect hears it change and not every event: the
+     session it reads arrives once a second. */
+  const headingUp = $derived(headingUpNow())
+  $effect(() => {
+    const active = isNavigating
+    void [headingUp, driving.speedZoom]
+    if (!ready) return
+    untrack(() => {
+      const ended = wasNavigating && !active
+      wasNavigating = active
+      if (following) settle(700, ended)
+      else if (ended) map?.easeTo({ bearing: 0, padding: NO_PADDING, duration: 700 })
+    })
+  })
+
+  /* The settings, each time the screen opens. */
+  $effect(() => {
+    loadDriving()
+  })
 
   /* The pin on the map, wherever it was set -- here, or before the
      screen was last left. untrack: the marker is MapLibre's to move. */
@@ -390,6 +494,9 @@
     map.easeTo({
       center: [pin.longitude, pin.latitude],
       zoom: Math.max(map.getZoom(), PIN_ZOOM),
+      /* In the middle: the driving view puts the car low, and the
+         pin is not the car. */
+      padding: NO_PADDING,
       duration: 700,
     })
   }
@@ -442,19 +549,12 @@
     listOpen = true
   }
 
-  /** Start guidance, then follow the car at street level. */
+  /** Start guidance, then follow the car in the driving view -- the
+   *  effect above eases into it as the session turns active. */
   async function start(): Promise<void> {
     if (!(await startNav())) return
-    const reading = position.reading
     following = true
     touched = false
-    if (map && located(reading)) {
-      map.easeTo({
-        center: car?.drawn ?? [reading.longitude, reading.latitude],
-        zoom: Math.max(map.getZoom(), PIN_ZOOM),
-        duration: 700,
-      })
-    }
   }
 
   /** The lines: while navigating, the route being driven, faded behind
@@ -561,26 +661,53 @@
     map.once('idle', drawLines)
   })
 
-  const zoomIn = () => map?.zoomIn()
-  const zoomOut = () => map?.zoomOut()
+  /** By hand: while driving a route, that stops the driving view
+   *  like any other touch on the map. */
+  function zoomBy(step: 1 | -1): void {
+    if (!map) return
+    if (isNavigating) {
+      touched = true
+      following = false
+    }
+    if (step > 0) map.zoomIn()
+    else map.zoomOut()
+  }
+  const zoomIn = () => zoomBy(1)
+  const zoomOut = () => zoomBy(-1)
 
-  /** To the car, and keep it there. With nothing known about where
-   *  the car is, back to where the map opened. */
+  /** To the car, and keep it there -- with the whole driving view
+   *  back while a route is being driven, heading up included. With
+   *  nothing known about where the car is, back to where the map
+   *  opened. */
   function locate(): void {
     if (!map) return
-    const reading = position.reading
-    if (!located(reading)) {
-      map.easeTo({ ...START, duration: 600 })
+    if (!located(position.reading)) {
+      map.easeTo({ ...START, padding: NO_PADDING, duration: 600 })
       return
     }
     following = true
-    map.easeTo({
-      center: car?.drawn ?? [reading.longitude, reading.latitude],
-      zoom: Math.max(map.getZoom(), NEAR),
-      duration: 600,
-    })
+    if (isNavigating) resumeHeading()
+    settle(600)
   }
-  const faceNorth = () => map?.easeTo({ bearing: 0, duration: 400 })
+
+  /** North up. While driving a route, for the rest of the drive: only
+   *  the turning stops -- following and the zoom carry on, and the
+   *  effect above eases the car back to the middle. */
+  function faceNorth(): void {
+    if (!map) return
+    if (isNavigating) {
+      northUp()
+      if (following) return
+    }
+    map.easeTo({ bearing: 0, duration: 400 })
+  }
+
+  /** Hollow when everything is automatic: following, and while
+   *  driving a route, turning with the car too if that is the choice.
+   *  Filled when pressing it would change something. */
+  const automatic = $derived(
+    following && (!isNavigating || !driving.headingUp || headingUp),
+  )
 
   const turned = $derived(Math.abs(bearing) > TURNED)
 
@@ -849,10 +976,12 @@
   </div>
 
   <div class="controls">
-    <!-- Only while the map is turned. At the top of a column anchored
-         to the bottom, so the buttons below it do not move when it
-         comes and goes. The needle points where north is. -->
-    {#if turned}
+    <!-- While the map is turned, and always while driving a route, so
+         which way is north can be read at a glance. At the top of a
+         column anchored to the bottom, so the buttons below it do not
+         move when it comes and goes. The needle points where north
+         is. -->
+    {#if turned || isNavigating}
       <button
         class="control compass"
         aria-label="Face north"
@@ -887,9 +1016,9 @@
          been dragged away, which is when it is worth pressing. -->
     <button
       class="control primary"
-      class:following
+      class:following={automatic}
       aria-label="Follow the car"
-      aria-pressed={following}
+      aria-pressed={automatic}
       disabled={!ready}
       onclick={locate}
     >

@@ -85,6 +85,13 @@ export class Car {
     })
   }
 
+  /** Which way the arrow points as drawn, mid-turn included -- what a
+   *  heading-up map turns to. Null until the car has moved, when
+   *  there is no direction to point the map in. */
+  get bearing(): number | null {
+    return this.heading === null ? null : this.drawnHeading
+  }
+
   attach(map: MapLibre): void {
     this.map = map
   }

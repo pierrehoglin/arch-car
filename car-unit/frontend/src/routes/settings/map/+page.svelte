@@ -7,6 +7,7 @@
   import Spinner from '$lib/ui/Spinner.svelte'
   import Switch from '$lib/ui/Switch.svelte'
   import * as stored from '$lib/api/settings'
+  import { applyDriving } from '$lib/driving.svelte'
   import { formatBytes, type MapJob } from '$lib/api/map'
   import {
     DETAIL_NAMES,
@@ -119,6 +120,7 @@
     navError = ''
     try {
       await stored.update({ [key]: value })
+      applyDriving(key, value)
     } catch {
       navValues[key] = previous
       navError = 'Could not save that setting.'
@@ -306,6 +308,36 @@
   {#if navError}
     <p class="warning">{navError}</p>
   {/if}
+</Card>
+
+<!-- How the maps behave while a route is being driven. Not at other
+     times: then the map is north up and stays where it is put. -->
+<Card eyebrow="Driving view" gap="none" trim>
+  <Row
+    title="Map direction when a route starts"
+    detail="The compass on the map switches to north up for the drive"
+  >
+    <Segmented
+      label="Map direction when a route starts"
+      value={navValues['navigation.heading_up'] === false ? 'north' : 'heading'}
+      options={[
+        { value: 'heading', label: 'Heading up' },
+        { value: 'north', label: 'North up' },
+      ]}
+      onchange={(value) => setNav('navigation.heading_up', value === 'heading')}
+    />
+  </Row>
+
+  <Row
+    title="Zoom with speed"
+    detail="Further out the faster the car goes, and in again before each turn"
+  >
+    <Switch
+      label="Zoom with speed"
+      checked={navValues['navigation.speed_zoom'] !== false}
+      onchange={(on) => setNav('navigation.speed_zoom', on)}
+    />
+  </Row>
 </Card>
 
 {#if mapData.error}
