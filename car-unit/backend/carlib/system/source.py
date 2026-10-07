@@ -161,6 +161,99 @@ def _clear_interrupted() -> None:
     state.update(STATE, interrupted=None)
 
 
+# --- Phone calls -------------------------------------------------------------
+#
+# A call silences everything for as long as it lasts, and puts back
+# what was playing when it ends -- only that, so a radio that was off
+# stays off. Held here, beside the traffic announcements, because the
+# two have to know about each other: an announcement must not cut into
+# a call, and a call that starts during one must give back what the
+# announcement had taken over from, not the radio it put on.
+#
+# In memory: the daemon runs both the supervisor and the call watcher,
+# and a call does not outlive the process.
+
+# While a call is going: what to resume afterwards, in order.
+#
+# Only what is playing when the call starts -- never what was playing
+# a moment before. A phone pausing its own music as a call rings looks
+# exactly like somebody pausing it just before calling, and resuming
+# the second is resuming music somebody stopped. The first needs no
+# help: a phone that pauses its music for a call resumes it itself
+# when the call ends.
+_call_resume: list[str] | None = None
+
+
+def in_call() -> bool:
+    return _call_resume is not None
+
+
+async def hold_for_call() -> list[str]:
+    """
+    Silence every source for a call. Returns what will be resumed.
+
+    Called again for a second call while the first is going, it
+    changes nothing: what was playing before the first is what comes
+    back after the last.
+    """
+    global _call_resume
+    if _call_resume is not None:
+        return list(_call_resume)
+    # Claimed at once, before anything is awaited: the supervisor polls
+    # meanwhile, and must already see a call and hold off a traffic
+    # announcement.
+    _call_resume = []
+
+    current = await status()
+    playing = [p.name for p in current.players if p.playing]
+    resume = list(playing)
+
+    # A traffic announcement had the radio: what it interrupted is
+    # what was really playing. The call ends the announcement.
+    came_from = _read_interrupted()
+    if came_from:
+        resume = [came_from if name == FM else name for name in resume]
+        if FM in playing and came_from not in resume:
+            resume.insert(0, came_from)
+        _clear_interrupted()
+
+    _call_resume = list(dict.fromkeys(resume))
+    for name in playing:
+        await pause(name)
+    return list(_call_resume)
+
+
+async def release_after_call() -> list[str]:
+    """Put back what the call silenced. Returns what was resumed."""
+    global _call_resume
+    resume = list(_call_resume or [])
+    # One source at a time is the rule anyway; the first is the one
+    # that was audible.
+    for name in resume[:1]:
+        try:
+            await _resume(name)
+        except (NotAvailableError, NotFoundError):
+            # Gone during the call -- a phone that dropped its media
+            # session, say. Silence rather than something else.
+            pass
+    # Cleared only once that is done: interrupted halfway, the note of
+    # what to resume is still there, and the next check finishes it.
+    _call_resume = None
+    return resume[:1]
+
+
+async def _resume(name: str) -> None:
+    if name == BT:
+        # AVRCP, as pause() does: the phone is not an MPRIS player,
+        # so select() cannot start it.
+        from carlib.bluetooth import media
+        await media.control('play')
+        _write_last_active(BT)
+        await pause_others(keep=BT)
+        return
+    await select(name)
+
+
 @dataclass
 class Player:
     """An MPRIS player, or the FM radio standing in as one."""
@@ -599,7 +692,17 @@ async def supervise(interval: float = POLL_INTERVAL,
                 # announcement is allowed to interrupt again.
                 ta_exhausted = False
 
-            if interrupting:
+            if interrupting and in_call():
+                # A call has taken over. It holds what the announcement
+                # interrupted and gives it back itself; nothing to
+                # restore here, and the still-set flag must not start
+                # another one the moment the call ends.
+                interrupting = False
+                interrupt_started = 0.0
+                ta_streak = 0
+                ta_exhausted = True
+
+            elif interrupting:
                 came_from = _read_interrupted()
                 # Checked while the flag is still set, not only when it
                 # clears -- a flag stuck true is exactly the case this
@@ -631,7 +734,8 @@ async def supervise(interval: float = POLL_INTERVAL,
                             pass
                     event = await status()
 
-            elif ta_on and ta_streak >= TA_DEBOUNCE and not ta_exhausted:
+            elif (ta_on and ta_streak >= TA_DEBOUNCE and not ta_exhausted
+                  and not in_call()):
                 _take_ta_skip()     # discard a token with nothing to skip
                 state = await status()
                 interrupt_started = time.monotonic()

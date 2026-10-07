@@ -34,6 +34,7 @@ from pydantic import BaseModel
 from carlib.core import settings, state
 from carlib.core.errors import CarError, NotFoundError
 from carlib.api import events, routes
+from carlib.bluetooth import callwatch
 from carlib.bluetooth.pairing import Pairing
 from carlib.location import geocoding, places, position
 from carlib.navigation import tiles, download, session, speedlimit
@@ -485,6 +486,12 @@ async def lifespan(app: FastAPI):
     _position_memory = asyncio.create_task(_remember_position())
     _position_watch = asyncio.create_task(_watch_position())
 
+    # Phone calls: followed from here, published through the stream.
+    # Connected before the watcher starts, so its first state is sent.
+    callwatch.current.on_change = lambda payload: events.events.publish(
+        'call', payload)
+    _call_watch = asyncio.create_task(callwatch.current.run())
+
     # Navigation reports through the stream, and picks up a route left
     # unfinished when the car was turned off. Resumed here, before the
     # position watcher's first reading, so that reading can place it.
@@ -525,6 +532,7 @@ async def lifespan(app: FastAPI):
 
     _position_memory.cancel()
     _position_watch.cancel()
+    _call_watch.cancel()
 
     for task in (_autostart_task, _geocoder, _audio_watch,
                  _bluetooth_watch, _media_watch, _network_watch,
@@ -684,6 +692,34 @@ class MapDownloadBody(BaseModel):
 class RouteBody(BaseModel):
     points: list[Point]
     costing: str | None = None
+
+
+class DialBody(BaseModel):
+    number: str
+    # The phone to call from, by Bluetooth address. May be left out
+    # with only one connected.
+    phone: str | None = None
+
+
+class CallBody(BaseModel):
+    # The call, by the id the 'call' event gives it. May be left out
+    # when only one call could be meant -- for hang-up, it then means
+    # every call.
+    id: str | None = None
+
+
+class CallMuteBody(BaseModel):
+    # Not MuteBody: that is the sound's, above, and a second class of
+    # the same name replaces it for every endpoint defined after.
+    on: bool
+    # Left out, the phone with a call going.
+    phone: str | None = None
+
+
+class TonesBody(BaseModel):
+    digits: str
+    # Left out, the connected call.
+    id: str | None = None
 
 
 class PlanBody(BaseModel):
@@ -1329,6 +1365,53 @@ async def post_navigate_update(body: UpdateBody) -> dict:
 @api.post('/navigate/end')
 async def post_navigate_end() -> dict:
     return await routes.navigate_end()
+
+
+@api.get('/call')
+async def get_call() -> dict:
+    """The calls, as the 'call' event has them -- for a screen opening
+    before the next change."""
+    return callwatch.current.payload()
+
+
+# The call requests. Each answers once the phone has accepted it, or
+# with the reason it would not (see callwatch.CallFailed). What happens
+# after that -- the other end answering, hanging up -- comes through
+# the 'call' event only.
+
+@api.post('/call/dial')
+async def post_call_dial(body: DialBody) -> dict:
+    return await callwatch.current.dial(body.number, body.phone)
+
+
+@api.post('/call/answer')
+async def post_call_answer(body: CallBody | None = None) -> dict:
+    return await callwatch.current.answer(body.id if body else None)
+
+
+@api.post('/call/decline')
+async def post_call_decline(body: CallBody | None = None) -> dict:
+    return await callwatch.current.decline(body.id if body else None)
+
+
+@api.post('/call/hangup')
+async def post_call_hangup(body: CallBody | None = None) -> dict:
+    return await callwatch.current.hangup(body.id if body else None)
+
+
+@api.post('/call/hold-answer')
+async def post_call_hold_answer(body: CallBody | None = None) -> dict:
+    return await callwatch.current.hold_and_answer(body.id if body else None)
+
+
+@api.post('/call/mute')
+async def post_call_mute(body: CallMuteBody) -> dict:
+    return await callwatch.current.mute(body.on, body.phone)
+
+
+@api.post('/call/tones')
+async def post_call_tones(body: TonesBody) -> dict:
+    return await callwatch.current.tones(body.digits, body.id)
 
 
 @api.get('/speedlimit')

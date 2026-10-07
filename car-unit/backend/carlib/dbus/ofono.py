@@ -83,6 +83,16 @@ class VoiceCallManager(DbusInterfaceCommonAsync,
     async def swap_calls(self) -> None:
         raise NotImplementedError
 
+    @dbus_method_async()
+    async def release_and_answer(self) -> None:
+        raise NotImplementedError
+
+    # DTMF during a call. On the call manager -- the Handsfree
+    # interface has no such method.
+    @dbus_method_async(input_signature='s')
+    async def send_tones(self, tones: str) -> None:
+        raise NotImplementedError
+
     @dbus_signal_async('oa{sv}')
     def call_added(self) -> tuple[str, dict]:
         raise NotImplementedError
@@ -105,6 +115,16 @@ class VoiceCall(DbusInterfaceCommonAsync,
 
     @dbus_method_async()
     async def answer(self) -> None:
+        raise NotImplementedError
+
+    @dbus_signal_async('sv')
+    def property_changed(self) -> tuple[str, tuple[str, object]]:
+        raise NotImplementedError
+
+    # Sent just before the call goes: "local" (hung up here), "remote"
+    # (the other end) or "network". CallRemoved does not say which.
+    @dbus_signal_async('s')
+    def disconnect_reason(self) -> str:
         raise NotImplementedError
 
 

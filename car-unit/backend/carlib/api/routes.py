@@ -578,9 +578,29 @@ async def audio_stream_mute(node_id: int, muted: bool) -> dict:
     if not await pipewire.exists(node_id):
         raise NotFoundError('stream', str(node_id), [])
 
-    await pipewire.set_mute(node_id, muted)
+    # The radio's own stream: through the radio, which keeps its own
+    # note of being paused -- muting is how it pauses. Muted or unmuted
+    # behind its back, the note went stale: unmuted here it played on
+    # while saying it was paused, and a call then found nothing playing
+    # to pause.
+    radio = await fm.status()
+    if radio.playing and await _is_radio_stream(node_id, radio):
+        await (fm.pause() if muted else fm.play())
+    else:
+        await pipewire.set_mute(node_id, muted)
     level, is_muted = await pipewire.get_volume(node_id)
     return {'node_id': node_id, 'percent': level, 'muted': is_muted}
+
+
+async def _is_radio_stream(node_id: int, radio) -> bool:
+    if radio.node_id == node_id:
+        return True
+    # The id the radio last noted can be stale -- PipeWire renumbers a
+    # stream that reconnects. Looked up afresh only when that missed.
+    try:
+        return await fm._resolve_node(force=True) == node_id
+    except CarError:
+        return False
 
 
 async def audio_microphone() -> dict:

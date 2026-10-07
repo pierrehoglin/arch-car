@@ -229,8 +229,9 @@ async def set_voice_recognition(enabled: bool,
 
 async def send_tones(tones: str, match: str | None = None) -> None:
     """DTMF digits during a call, for phone menus."""
-    modem = await resolve(match)
-    await ofono.handsfree_proxy(modem.path).send_tones(tones)
+    modem = await _ready(match)
+    # VoiceCallManager.SendTones: Handsfree has no such method.
+    await ofono.calls_proxy(modem.path).send_tones(tones)
 
 
 async def volume(match: str | None = None,
