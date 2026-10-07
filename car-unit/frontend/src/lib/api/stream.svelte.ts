@@ -39,6 +39,7 @@ const KNOWN = [
   'map',
   'position',
   'speedlimit',
+  'call',
   'place',
   'navigation',
 ] as const

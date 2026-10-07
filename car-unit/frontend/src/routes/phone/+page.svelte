@@ -16,6 +16,13 @@
     refresh,
   } from '$lib/phonebook.svelte'
   import type { Contact } from '$lib/api/types'
+  import Spinner from '$lib/ui/Spinner.svelte'
+  import {
+    call as phoneCall,
+    canCall,
+    dial as placeCall,
+    onEnded,
+  } from '$lib/call.svelte'
 
   /* The cache first, then whatever the phone sends.
    *
@@ -292,13 +299,60 @@
     )
   }
 
-  /* Into the keypad rather than straight to a call: the Call button
-     is right there, and putting a number in it is a step somebody
-     can see and undo. */
-  function dial(number: string): void {
-    dialled = number
-    showing = null
+  /* Calls go from the phone whose books are showing -- with two
+     connected, the one chosen above. Empty means the only one, which
+     the daemon picks when there is just one. */
+  const from = $derived(phonebook.address || undefined)
+  const canPlace = $derived(canCall(from))
+
+  /** Why calling is not possible, said where the buttons are. */
+  const cannot = $derived(
+    canPlace
+      ? ''
+      : from && phoneCall.status.available
+        ? 'This phone is not connected for calls'
+        : 'No phone connected for calls',
+  )
+
+  /* What went wrong placing a call, where it was placed from: before
+     the call exists there is no card to say it on. */
+  let keypadError = $state('')
+  let sheetError = $state('')
+
+  /* Each about what was tried: gone once the number changes, or the
+     contact sheet does. */
+  $effect(() => {
+    void dialled
+    keypadError = ''
+  })
+  $effect(() => {
+    void showing
+    sheetError = ''
+  })
+
+  /* A contact's number calls straight away -- one tap while driving
+     rather than two. The card that appears has End, which undoes it. */
+  async function dial(number: string): Promise<void> {
+    sheetError = ''
+    const error = await placeCall(number, from)
+    if (error) sheetError = error
+    else showing = null
   }
+
+  async function callDialled(): Promise<void> {
+    keypadError = ''
+    const error = await placeCall(dialled, from)
+    if (error) keypadError = error
+  }
+
+  /* The recent calls, refreshed once a call on this phone is over:
+     the phone has written it into its log by then. */
+  $effect(() =>
+    onEnded((phone) => {
+      if (phone !== phonebook.address) return
+      setTimeout(() => refresh('cch'), 2000)
+    }),
+  )
 
   /* Derived rather than computed in the markup: {@const} is only
      allowed as the immediate child of a block, and this belongs
@@ -491,7 +545,11 @@
             <!-- Every number, not just the first. Which one to ring
                  is the question this dialog exists to answer. -->
             <li>
-              <button class="number" onclick={() => dial(entry.number)}>
+              <button
+                class="number"
+                disabled={!canPlace || !!phoneCall.busy}
+                onclick={() => dial(entry.number)}
+              >
                 <span class="number-labels">
                   <span class="number-type">
                     {numberLabel(entry.type)}
@@ -503,6 +561,9 @@
             </li>
           {/each}
         </ul>
+        {#if cannot || sheetError}
+          <p class="call-error">{cannot || sheetError}</p>
+        {/if}
       {:else}
         <p class="empty">No number for this contact</p>
       {/if}
@@ -760,10 +821,23 @@
         {/each}
       </div>
 
-      <button class="call-button" disabled={!dialled}>
-        <Icon name="phone" size={19} />
+      <button
+        class="call-button"
+        disabled={!dialled || !canPlace || !!phoneCall.busy}
+        onclick={callDialled}
+      >
+        {#if phoneCall.busy === 'dial'}
+          <Spinner size={18} label="Calling" />
+        {:else}
+          <Icon name="phone" size={19} />
+        {/if}
         Call
       </button>
+      <!-- Why it cannot call now first: an error from a try before the
+           phone went is no longer the reason. -->
+      {#if (dialled && cannot) || keypadError}
+        <p class="call-error">{(dialled && cannot) || keypadError}</p>
+      {/if}
     </Card>
   </div>
 </div>
@@ -1364,6 +1438,18 @@
        it, it just has nothing to dial yet. */
     opacity: 0.45;
     cursor: default;
+  }
+
+  /* Why a call did not go, or cannot: under what was pressed. */
+  .call-error {
+    margin: var(--spacing-xs) 0 0;
+    font-size: 13px;
+    text-align: center;
+    color: var(--danger);
+  }
+
+  .number:disabled {
+    opacity: 0.5;
   }
 
   .call-button:focus-visible {

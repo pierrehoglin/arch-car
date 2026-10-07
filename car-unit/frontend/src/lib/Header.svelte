@@ -1,5 +1,6 @@
 <script lang="ts">
   import Icon from './Icon.svelte'
+  import CallIndicator from './CallIndicator.svelte'
   import { status } from './status.svelte'
   import { bluetooth, connected } from './bluetooth.svelte'
   import { mode, network, online } from './network.svelte'
@@ -125,6 +126,10 @@
   </div>
 
   <div class="status">
+    <!-- First, so it is the thing the eye meets coming from the
+         volume; there only while a call is. -->
+    <CallIndicator />
+
     {#if outside !== null}
       <span class="temp">{outside}°</span>
     {/if}

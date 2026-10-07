@@ -17,17 +17,22 @@ export interface ApiError {
   error: string
   type: string
   hint?: string
+  /** Why, as a word a screen can act on -- several reasons can share
+   *  one status. Only some errors carry it. */
+  reason?: string
 }
 
 export class RequestFailed extends Error {
   status: number
   hint: string
+  reason: string
 
-  constructor(status: number, message: string, hint = '') {
+  constructor(status: number, message: string, hint = '', reason = '') {
     super(message)
     this.name = 'RequestFailed'
     this.status = status
     this.hint = hint
+    this.reason = reason
   }
 }
 
@@ -86,6 +91,7 @@ export async function request<T>(
       response.status,
       detail?.error ?? `request failed (${response.status})`,
       detail?.hint ?? '',
+      detail?.reason ?? '',
     )
   }
 

@@ -47,6 +47,7 @@
   import IconBackspace from '~icons/tabler/backspace'
   import IconClose from '~icons/tabler/x'
   import IconChevronDown from '~icons/tabler/chevron-down'
+  import IconChevronUp from '~icons/tabler/chevron-up'
   import IconChevronLeft from '~icons/tabler/chevron-left'
   import IconChevronRight from '~icons/tabler/chevron-right'
   import IconCar from '~icons/tabler/brand-speedtest'
@@ -80,6 +81,11 @@
   import IconMinus from '~icons/tabler/minus'
   import IconMusic from '~icons/tabler/music'
   import IconPhone from '~icons/tabler/phone'
+  import IconPhoneOff from '~icons/tabler/phone-off'
+  import IconPhonePause from '~icons/tabler/phone-pause'
+  import IconMicOff from '~icons/tabler/microphone-off'
+  import IconMic from '~icons/tabler/microphone'
+  import IconDialpad from '~icons/tabler/dialpad'
   import IconPlus from '~icons/tabler/plus'
   import IconPower from '~icons/tabler/power'
   import IconRefresh from '~icons/tabler/refresh'
@@ -144,6 +150,7 @@
     up: IconArrowUp,
     close: IconClose,
     'chevron-down': IconChevronDown,
+    'chevron-up': IconChevronUp,
     'chevron-left': IconChevronLeft,
     'chevron-right': IconChevronRight,
     car: IconCar,
@@ -179,6 +186,11 @@
     note: IconMusic,
     pause: IconPause,
     phone: IconPhone,
+    'phone-off': IconPhoneOff,
+    'phone-hold': IconPhonePause,
+    'mic-off': IconMicOff,
+    mic: IconMic,
+    dialpad: IconDialpad,
     play: IconPlay,
     power: IconPower,
     previous: IconPrevious,

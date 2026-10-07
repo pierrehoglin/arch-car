@@ -69,6 +69,11 @@
   /* Behind a readout that floats over the map: the speed. Black
      rather than the panel colour, so it stands off a dark map. */
   --readout: #000000;
+  /* Calls: ringing or calling, connected, ended -- the phone's own
+     colours rather than the accent, which means "selected". */
+  --call-ring: #e8a33a;
+  --call-live: #2fae66;
+  --call-end: #e5484d;
 }
 
 /* Day / LIGHT — a warm Nordic light variant. */
@@ -92,6 +97,9 @@
   --danger: #c0392b;
   --knob: #ffffff;
   --readout: #ffffff;
+  --call-ring: #d98c0b;
+  --call-live: #1f9d55;
+  --call-end: #d93a3a;
 }
 
 /* Night Panel — a calmer, near-monochrome instrument mode for driving in the
@@ -119,6 +127,9 @@
   --danger: #ff8a80;
   --knob: #ffffff;
   --readout: #000000;
+  --call-ring: #b07a2a;
+  --call-live: #23804b;
+  --call-end: #a8383b;
   --dim-secondary: 0.12;
 }
 

@@ -8,6 +8,8 @@
   import { watch as watchBluetooth } from '$lib/bluetooth.svelte'
   import { watch as watchNetwork } from '$lib/network.svelte'
   import PairingDialog from '$lib/ui/PairingDialog.svelte'
+  import CallCard from '$lib/ui/CallCard.svelte'
+  import { refresh as refreshCall, watch as watchCall } from '$lib/call.svelte'
   import {
     accent,
     display,
@@ -71,6 +73,13 @@
      here rather than by the settings page that changes it. */
   $effect(() => watchNetwork())
 
+  /* Calls are followed here too: one can ring on any screen, and the
+     card and the status bar show it wherever you are. */
+  $effect(() => {
+    refreshCall()
+    return watchCall()
+  })
+
   /* The stored preferences, once. The screens render before this
      lands, so the default theme shows for a moment and is then
      replaced -- which is why the store will not save anything
@@ -110,6 +119,9 @@
     </main>
   </div>
 </div>
+
+<!-- Over every screen, wherever a call rings or is going. -->
+<CallCard />
 
 <!-- Over everything, because the phone is waiting and BlueZ gives up
      after half a minute. -->
