@@ -3,6 +3,7 @@
   import Avatar from './Avatar.svelte'
   import Spinner from './Spinner.svelte'
   import { photoUrl, type Call } from '../api/call'
+  import { audio } from '../audio.svelte'
   import {
     answer,
     call,
@@ -16,6 +17,7 @@
     phoneOf,
     tone,
     toggleMute,
+    toggleSpeaker,
   } from '../call.svelte'
 
   /* The call, on whatever screen is showing: top centre, just under
@@ -180,7 +182,7 @@
         <button
           class="action toggle"
           class:on={muted}
-          aria-label="Mute"
+          aria-label="Mute microphone"
           aria-pressed={muted}
           disabled={!!call.busy}
           onclick={() => toggleMute(lead)}
@@ -191,6 +193,17 @@
             {:else}
               <Icon name={muted ? 'mic-off' : 'mic'} size={26} />
             {/if}
+          </span>
+        </button>
+        <button
+          class="action toggle"
+          class:on={audio.muted}
+          aria-label="Mute speaker"
+          aria-pressed={audio.muted}
+          onclick={toggleSpeaker}
+        >
+          <span class="round">
+            <Icon name={audio.muted ? 'muted' : 'volume'} size={26} />
           </span>
         </button>
         <button
@@ -430,7 +443,7 @@
   .actions {
     display: flex;
     justify-content: center;
-    gap: 40px;
+    gap: 32px;
   }
 
   .actions:empty {

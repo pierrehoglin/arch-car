@@ -1,5 +1,6 @@
 import * as api from './api/call'
 import { on } from './api/stream.svelte'
+import { audio, setMuted } from './audio.svelte'
 import type { Call, CallPhone, CallStatus } from './api/call'
 
 /* Phone calls, as every screen sees them.
@@ -102,6 +103,13 @@ function take(next: CallStatus): void {
   }
   seen = new Set(next.calls.map((c) => c.id))
 
+  /* The speaker, muted from the card, comes back once no call is
+     going -- the music resumes then, and should be heard. */
+  if (speakerMutedHere && !next.calls.some((c) => c.state !== 'ended')) {
+    speakerMutedHere = false
+    if (audio.muted) setMuted(false)
+  }
+
   /* Gone altogether once the last call has dropped out of the list:
      nothing to show, so nothing open. */
   if (!next.calls.length) call.open = false
@@ -193,6 +201,18 @@ export const canCall = (phone?: string): boolean =>
   phone
     ? call.status.phones.some((p) => p.address === phone.toUpperCase())
     : call.status.available
+
+/* The speaker, from the card. The same mute as the status bar's, so
+   both always agree; only remembered as the card's own so that it is
+   lifted when the call ends -- a speaker muted before the call, from
+   the status bar, stays as it was. */
+let speakerMutedHere = false
+
+export function toggleSpeaker(): void {
+  const want = !audio.muted
+  speakerMutedHere = want
+  setMuted(want)
+}
 
 export const minimize = () => (call.open = false)
 export const show = () => {
