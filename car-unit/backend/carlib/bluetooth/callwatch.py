@@ -13,9 +13,15 @@ Several phones can be connected at once -- two people in the car is
 the ordinary case -- and each has its own hands-free link, followed
 separately. Every call says which phone it is on, and call ids are
 unique across phones, so a request about a call needs only its id.
-Dialling and muting name the phone instead. Either can be left out
-when there is only one candidate; when there is more than one, the
-request is refused as ambiguous rather than guessed at.
+Dialling names the phone instead. Either can be left out when there
+is only one candidate; when there is more than one, the request is
+refused as ambiguous rather than guessed at.
+
+Muting is the car's own microphone, not the phone's: hands-free has
+no mute command for the car to send (oFono answers NotImplemented),
+and there is one microphone, so one mute covers every call going. It
+is lifted when the last call ends, so the next one never starts
+muted with nobody here knowing why.
 
 The 'call' event:
 
@@ -24,7 +30,8 @@ The 'call' event:
       "phones": [{
         "address": "AA:BB:CC:DD:EE:FF",
         "name": "Pixel 8",
-        "muted": false              its microphone, during its calls
+        "muted": false              the car's microphone, while this
+                                    phone has a call
       }],
       "calls": [{
         "id": "AABBCCDDEEFF-3",
@@ -59,6 +66,7 @@ from typing import Callable
 from carlib.core.errors import CarError, NotAvailableError
 from carlib.dbus import ofono
 from carlib.dbus.variants import props
+from carlib.system import audio
 
 log = logging.getLogger('carlib')
 
@@ -215,6 +223,8 @@ class Watcher:
         self._call_tasks: dict[str, list[asyncio.Task]] = {}
         self._reasons: dict[str, str] = {}
         self._holding = False
+        # Whether this muted the microphone, for the call going.
+        self._mic_muted = False
         # Set when the music may need pausing or resuming; acted on by
         # a task of its own -- see _music_loop.
         self._music_wanted = asyncio.Event()
@@ -406,9 +416,6 @@ class Watcher:
         for path, call in list(self.calls.items()):
             if call.phone == line.address and path not in seen and call.live:
                 self._ended(path)
-        with contextlib.suppress(Exception):
-            volume = props(await ofono.volume_proxy(modem_path).get_properties())
-            line.muted = bool(volume.get('Muted', False))
 
     def _update(self, line: Line, path: str, changes: dict) -> None:
         call = self.calls.get(path)
@@ -467,17 +474,16 @@ class Watcher:
     async def _after_change(self) -> None:
         """Publish; silence or restore the music as calls begin and
         end; unmute a phone whose calls are over."""
+        if self._mic_muted and not any(c.live for c in self.calls.values()):
+            # The microphone stays muted in PipeWire after the call; the
+            # next call starting muted would have the other end hearing
+            # nothing and nobody here knowing why.
+            with contextlib.suppress(Exception):
+                await audio.set_muted(False, audio.SOURCE)
+            self._mic_muted = False
         for line in self.lines.values():
-            busy = any(c.live and c.phone == line.address
-                       for c in self.calls.values())
-            if not busy and line.muted:
-                # oFono keeps the microphone muted between calls; the
-                # next call starting muted would have the other end
-                # hearing nothing and nobody here knowing why.
-                with contextlib.suppress(Exception):
-                    await ofono.volume_proxy(line.modem.path).set_property(
-                        'Muted', ('b', False))
-                line.muted = False
+            line.muted = self._mic_muted and any(
+                c.live and c.phone == line.address for c in self.calls.values())
         self._publish()
         self._music_wanted.set()
 
@@ -652,26 +658,22 @@ class Watcher:
         await self._done()
         return {'id': call.id}
 
-    def _busy_phone(self, address: str | None) -> Line:
-        """The phone named, or the one with a call going."""
-        if address or len(self.lines) <= 1:
-            return self._phone(address)
-        busy = {c.phone for c in self.calls.values()
-                if c.state in ('active', 'held', 'dialing', 'alerting')}
-        lines = [line for line in self.lines.values() if line.address in busy]
-        if len(lines) == 1:
-            return lines[0]
-        raise CallFailed('choose_phone', 'say which phone')
-
     async def mute(self, on: bool, phone: str | None = None) -> dict:
-        line = self._busy_phone(phone)
+        """Mute the car's microphone for the calls going. A phone may
+        be named, and must then be one that is connected; with one
+        microphone, the mute is the same for all of them."""
+        if phone:
+            self._phone(phone)
+        if not any(c.live for c in self.calls.values()):
+            raise CallFailed('no_call', 'no call to mute')
         try:
-            await ofono.volume_proxy(line.modem.path).set_property(
-                'Muted', ('b', bool(on)))
-        except Exception as exc:
-            raise _refusal(exc, 'mute') from exc
+            await audio.set_muted(bool(on), audio.SOURCE)
+        except CarError as exc:
+            raise CallFailed('refused', f'the microphone would not '
+                             f'{"mute" if on else "unmute"}: {exc}') from exc
+        self._mic_muted = bool(on)
         await self._done()
-        return {'phone': line.address, 'muted': line.muted}
+        return {'muted': self._mic_muted}
 
     async def tones(self, digits: str, call_id: str | None = None) -> dict:
         call = self._call(('active',), call_id)

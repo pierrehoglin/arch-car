@@ -34,7 +34,7 @@ from pydantic import BaseModel
 from carlib.core import settings, state
 from carlib.core.errors import CarError, NotFoundError
 from carlib.api import events, routes
-from carlib.bluetooth import callwatch
+from carlib.bluetooth import callwatch, reconnect
 from carlib.bluetooth.pairing import Pairing
 from carlib.location import geocoding, places, position
 from carlib.navigation import tiles, download, session, speedlimit
@@ -492,6 +492,9 @@ async def lifespan(app: FastAPI):
         'call', payload)
     _call_watch = asyncio.create_task(callwatch.current.run())
 
+    # The phones from last time, asked to connect as the car comes on.
+    _reconnect = asyncio.create_task(reconnect.current.run())
+
     # Navigation reports through the stream, and picks up a route left
     # unfinished when the car was turned off. Resumed here, before the
     # position watcher's first reading, so that reading can place it.
@@ -533,6 +536,7 @@ async def lifespan(app: FastAPI):
     _position_memory.cancel()
     _position_watch.cancel()
     _call_watch.cancel()
+    _reconnect.cancel()
 
     for task in (_autostart_task, _geocoder, _audio_watch,
                  _bluetooth_watch, _media_watch, _network_watch,

@@ -37,6 +37,7 @@
     setMode,
   } from '$lib/network.svelte'
   import type { Listed } from '$lib/network.svelte'
+  import * as stored from '$lib/api/settings'
 
   /* No subscription here: the root layout follows Bluetooth and the
      radio for the whole session, so this screen only reads what is
@@ -128,6 +129,34 @@
      the phone has to forget the car too before they can pair again --
      so a mis-tap while moving costs more than a moment. */
   let forgetting = $state<BtDevice | null>(null)
+
+  /* Connecting the phones from the last drive on start. Read from
+     the daemon's catalogue so the default lives in settings.py alone;
+     put back if the write fails. */
+  const AUTO = 'bluetooth.auto_connect'
+  let autoConnect = $state(true)
+  let autoError = $state('')
+
+  $effect(() => {
+    stored
+      .catalogue()
+      .then((entries) => {
+        const entry = entries.find((e) => e.key === AUTO)
+        if (entry) autoConnect = Boolean(entry.set ? entry.value : entry.default)
+      })
+      .catch(() => {})
+  })
+
+  async function setAutoConnect(want: boolean): Promise<void> {
+    autoConnect = want
+    autoError = ''
+    try {
+      await stored.update({ [AUTO]: want })
+    } catch {
+      autoConnect = !want
+      autoError = 'Could not save that setting.'
+    }
+  }
 
   function run(device: BtDevice): void {
     if (device.connected) disconnect(device.address)
@@ -336,6 +365,16 @@
       checked={on}
       disabled={bluetooth.switching}
       onchange={(want) => setService(want)}
+    />
+  </Row>
+  <Row
+    title="Connect phones on start"
+    detail={autoError || 'The phones from the last drive, as the car comes on'}
+  >
+    <Switch
+      label="Connect phones on start"
+      checked={autoConnect}
+      onchange={(want) => setAutoConnect(want)}
     />
   </Row>
 </Card>

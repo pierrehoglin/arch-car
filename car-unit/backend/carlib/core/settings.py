@@ -355,6 +355,14 @@ CATALOGUE: tuple[Known, ...] = (
     Known('fm.last', {}, 'The station playing when the radio last '
           'stopped, so it resumes there.', 'dict'),
 
+    Known('bluetooth.auto_connect', True, 'Connect the phones from '
+          'the last drive when the car starts, or when Bluetooth is '
+          'switched on. One try each: a phone not there is left as it '
+          'is.', 'bool'),
+    Known('bluetooth.last_phones', [], 'The phones connected on the '
+          'last drive, written by the daemon. Managed, not set.',
+          'list'),
+
     Known('weather.provider', 'metno', 'Which weather service to use. '
           'See `weather providers`.'),
     Known('weather.contact', '', 'Overrides `contact` for weather '
